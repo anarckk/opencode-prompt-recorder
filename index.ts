@@ -1,6 +1,6 @@
-import type { Plugin } from "@opencode-ai/plugin"
 import { mkdir, appendFile, readdir } from "fs/promises"
 import { join } from "path"
+import type { Plugin } from "@opencode-ai/plugin"
 
 /**
  * 过滤文件名中的非法字符，防止文件系统操作失败
@@ -84,7 +84,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
         const text = output.parts.map(p => p.type === "text" ? p.text : "").join("")
 
         // 使用 input.sessionID，这是聊天消息自带的会话标识
-        const sessionId = (input as { sessionID?: string }).sessionID
+        const sessionId = input.sessionID
 
         // 跳过无效的 sessionId，避免创建多个文件
         if (!sessionId) {
@@ -108,11 +108,11 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           const time = formatTime(new Date())
 
           // 根据是否有现有文件决定内容格式
-          // 有现有文件：追加内容需要添加 --- 分隔符和新时间标题
+          // 有现有文件：追加内容需要添加空行和新时间标题
           // 无现有文件：新文件只需要时间标题
           const timeTitle = `============ ${time} ============`
           const content = existingFile
-            ? `\n---\n\n${timeTitle}\n\n${text}`
+            ? `\n\n${timeTitle}\n\n${text}`
             : `${timeTitle}\n\n${text}`
 
           if (existingFile) {

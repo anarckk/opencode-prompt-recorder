@@ -1,6 +1,6 @@
 {
   "name": "opencode-prompt-recorder",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "OpenCode plugin for recording user prompts. Automatically saves user messages to a local file system with organized directory structure.",
   "type": "module",
   "main": "./dist/index.js",
@@ -31,16 +31,16 @@
     "ai",
     "audit"
   ],
-  "author": "OpenCode Community",
+  "author": "anarckk",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/H2Shami/opencode-prompt-recorder.git"
+    "url": "git+https://github.com/anarckk/opencode-prompt-recorder.git"
   },
   "bugs": {
-    "url": "https://github.com/H2Shami/opencode-prompt-recorder/issues"
+    "url": "https://github.com/anarckk/opencode-prompt-recorder/issues"
   },
-  "homepage": "https://github.com/H2Shami/opencode-prompt-recorder#readme",
+  "homepage": "https://github.com/anarckk/opencode-prompt-recorder#readme",
   "peerDependencies": {
     "@opencode-ai/plugin": ">=0.15.0",
     "typescript": ">=5.0.0"
