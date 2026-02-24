@@ -4,9 +4,15 @@ import { fileURLToPath } from "url"
 import type { Plugin } from "@opencode-ai/plugin"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const packageJsonPath = join(__dirname, "package.json")
-const packageJson = JSON.parse(await readFile(packageJsonPath, "utf-8"))
-const PLUGIN_VERSION = packageJson.version
+
+async function getVersion(): Promise<string> {
+  try {
+    const packageJson = JSON.parse(await readFile(join(__dirname, "package.json"), "utf-8"))
+    return packageJson.version
+  } catch {
+    return "unknown"
+  }
+}
 
 /**
  * 过滤文件名中的非法字符，防止文件系统操作失败
@@ -46,7 +52,7 @@ function formatTime(date: Date): string {
  * @param sessionId - 会话ID
  * @returns 找到的文件路径，未找到则返回 null
  */
-export async function findExistingFile(directory: string, sessionId: string): Promise<string | null> {
+async function findExistingFile(directory: string, sessionId: string): Promise<string | null> {
   if (!sessionId) return null
 
   const promptsBaseDir = join(directory, ".agent", "prompts")
@@ -98,14 +104,19 @@ export async function findExistingFile(directory: string, sessionId: string): Pr
 export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
   let lastUserMessage: string = ""
 
-  const versionFilePath = join(process.env.HOME || "", ".config", "opencode", "opencode-prompt-recorder-version.txt")
-
   return {
     // 使用 chat.message 事件监听用户消息（来自 SDK 类型定义）
     "chat.message": async (input, output) => {
       // 写入版本号文件
-      await mkdir(join(process.env.HOME || "", ".config", "opencode"), { recursive: true })
-      await writeFile(versionFilePath, PLUGIN_VERSION)
+      try {
+        const version = await getVersion()
+        const versionDir = join(process.env.HOME || "", ".config", "opencode")
+        await mkdir(versionDir, { recursive: true })
+        const content = `opencode-prompt-recorder:${version}\n\n说明:本文件是插件自动写入。`
+        await writeFile(join(versionDir, "opencode-prompt-recorder-version.txt"), content)
+      } catch (e) {
+        // 忽略版本号文件写入错误
+      }
 
       // 只处理用户消息
       if (output.message.role === "user") {
