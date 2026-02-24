@@ -1,6 +1,12 @@
-import { mkdir, appendFile, readdir } from "fs/promises"
-import { join } from "path"
+import { mkdir, appendFile, readdir, writeFile, readFile } from "fs/promises"
+import { join, dirname } from "path"
+import { fileURLToPath } from "url"
 import type { Plugin } from "@opencode-ai/plugin"
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const packageJsonPath = join(__dirname, "package.json")
+const packageJson = JSON.parse(await readFile(packageJsonPath, "utf-8"))
+const PLUGIN_VERSION = packageJson.version
 
 /**
  * 过滤文件名中的非法字符，防止文件系统操作失败
@@ -92,9 +98,15 @@ export async function findExistingFile(directory: string, sessionId: string): Pr
 export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
   let lastUserMessage: string = ""
 
+  const versionFilePath = join(process.env.HOME || "", ".config", "opencode", "opencode-prompt-recorder-version.txt")
+
   return {
     // 使用 chat.message 事件监听用户消息（来自 SDK 类型定义）
     "chat.message": async (input, output) => {
+      // 写入版本号文件
+      await mkdir(join(process.env.HOME || "", ".config", "opencode"), { recursive: true })
+      await writeFile(versionFilePath, PLUGIN_VERSION)
+
       // 只处理用户消息
       if (output.message.role === "user") {
         // 从 parts 中提取文本内容
