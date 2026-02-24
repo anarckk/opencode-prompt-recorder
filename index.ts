@@ -101,25 +101,45 @@ async function findExistingFile(directory: string, sessionId: string): Promise<s
  * @param client - OpenCode SDK 客户端（当前未使用，保留以备将来扩展）
  * @returns 插件钩子对象
  */
-export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
+export const OpenCodePromptRecorder: Plugin = async ({ directory, client: _client }) => {
   let lastUserMessage: string = ""
+  let versionFileWritten = false
 
   return {
     // 使用 chat.message 事件监听用户消息（来自 SDK 类型定义）
     "chat.message": async (input, output) => {
-      // 写入版本号文件
-      try {
-        const version = await getVersion()
-        const versionDir = join(process.env.HOME || "", ".config", "opencode")
-        await mkdir(versionDir, { recursive: true })
-        const content = `opencode-prompt-recorder:${version}\n\n说明:本文件是插件自动写入。`
-        await writeFile(join(versionDir, "opencode-prompt-recorder-version.txt"), content)
-      } catch (e) {
-        // 忽略版本号文件写入错误
+      // 写入版本号文件（只写一次）
+      if (!versionFileWritten) {
+        try {
+          const version = await getVersion()
+          const versionDir = join(process.env.HOME || "", ".config", "opencode")
+          const versionFile = join(versionDir, "opencode-prompt-recorder-version.txt")
+          const content = `opencode-prompt-recorder:${version}\n\n说明:本文件是插件自动写入。`
+          
+          // 检查文件是否已存在且内容相同，避免重复写入
+          try {
+            const existing = await readFile(versionFile, "utf-8")
+            if (existing === content) {
+              versionFileWritten = true
+              return
+            }
+          } catch {
+            // 文件不存在，继续写入
+          }
+          
+          await mkdir(versionDir, { recursive: true })
+          await writeFile(versionFile, content)
+          versionFileWritten = true
+        } catch (e) {
+          // 忽略版本号文件写入错误
+        }
       }
 
       // 只处理用户消息
       if (output.message.role === "user") {
+        // 复用 Date 对象，避免重复计算
+        const now = new Date()
+        
         // 从 parts 中提取文本内容
         const text = output.parts.map(p => p.type === "text" ? p.text : "").join("")
 
@@ -134,7 +154,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
         // 避免重复处理相同的消息
         if (text && text !== lastUserMessage) {
           // 构建日期路径
-          const { yyyy, MM, dd, HH, mm } = formatDate(new Date())
+          const { yyyy, MM, dd, HH, mm } = formatDate(now)
           const topic = sanitizeFilename(text)
           const promptDir = join(directory, ".agent", "prompts", yyyy, MM, dd)
 
@@ -145,24 +165,24 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           const existingFile = await findExistingFile(directory, sessionId)
 
           // 格式化时间
-          const time = formatTime(new Date())
+          const time = formatTime(now)
 
           // 根据是否有现有文件决定内容格式
           // 有现有文件：追加内容需要添加空行和新时间标题
           // 无现有文件：新文件只需要时间标题
           const timeTitle = `============ ${time} ============`
-          const content = existingFile
+          const fileContent = existingFile
             ? `\n\n${timeTitle}\n\n${text}`
             : `${timeTitle}\n\n${text}`
 
           if (existingFile) {
             // 追加到现有文件
-            await appendFile(existingFile, content)
+            await appendFile(existingFile, fileContent)
           } else {
             // 创建新文件
             const filename = `${HH}${mm}-${sessionId}-${topic}.md`
             const filepath = join(promptDir, filename)
-            await appendFile(filepath, content)
+            await appendFile(filepath, fileContent)
           }
 
           // 更新上次处理的消息内容
