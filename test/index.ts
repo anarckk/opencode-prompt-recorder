@@ -117,11 +117,15 @@ async function testDifferentSession() {
 }
 
 async function main() {
-  await setup()
-  await testCrossDayMerge()
-  await testCrossDayAppend()
-  await testDifferentSession()
-  console.log("测试完成")
+  try {
+    await setup()
+    await testCrossDayMerge()
+    await testCrossDayAppend()
+    await testDifferentSession()
+    console.log("测试完成")
+  } finally {
+    await cleanup()
+  }
 }
 
 main().catch(console.error)
