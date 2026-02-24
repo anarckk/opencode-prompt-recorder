@@ -35,20 +35,37 @@ function formatTime(date: Date): string {
 }
 
 /**
- * 在指定目录中查找与 sessionId 关联的现有文件
- * @param promptDir - 提示词保存目录
+ * 在所有日期目录中查找与 sessionId 关联的现有文件
+ * @param directory - 项目根目录
  * @param sessionId - 会话ID
  * @returns 找到的文件路径，未找到则返回 null
  */
-async function findExistingFile(promptDir: string, sessionId: string): Promise<string | null> {
+export async function findExistingFile(directory: string, sessionId: string): Promise<string | null> {
   if (!sessionId) return null
-  
-  const files = await readdir(promptDir)
-  // 文件名格式：HHmm-{sessionId}-{topic}.md，匹配前缀包含 -{sessionId}- 的文件
-  for (const file of files) {
-    if (file.includes(`-${sessionId}-`)) {
-      return join(promptDir, file)
+
+  const promptsBaseDir = join(directory, ".agent", "prompts")
+
+  try {
+    const years = await readdir(promptsBaseDir)
+    for (const year of years) {
+      const yearPath = join(promptsBaseDir, year)
+      const months = await readdir(yearPath)
+      for (const month of months) {
+        const monthPath = join(yearPath, month)
+        const days = await readdir(monthPath)
+        for (const day of days) {
+          const dayPath = join(monthPath, day)
+          const files = await readdir(dayPath)
+          for (const file of files) {
+            if (file.includes(`-${sessionId}-`)) {
+              return join(dayPath, file)
+            }
+          }
+        }
+      }
     }
+  } catch {
+    // 目录不存在时返回 null
   }
   return null
 }
@@ -101,8 +118,8 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           // 确保目录存在
           await mkdir(promptDir, { recursive: true })
 
-          // 查找同一会话ID的现有文件
-          const existingFile = await findExistingFile(promptDir, sessionId)
+          // 查找同一会话ID的现有文件（跨日期搜索）
+          const existingFile = await findExistingFile(directory, sessionId)
 
           // 格式化时间
           const time = formatTime(new Date())

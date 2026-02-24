@@ -82,6 +82,7 @@ bun add -g opencode-prompt-recorder
 - 相同的会话 ID 追加到现有文件
 - 不同的会话 ID 创建新文件
 - 会话 ID 来自 `chat.message` 事件输入
+- 跨天合并：无论何时，只要 sessionId 相同，都会追加到同一文件（自动搜索所有日期目录）
 
 ## 使用场景
 

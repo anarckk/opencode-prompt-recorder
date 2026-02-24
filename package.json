@@ -1,6 +1,6 @@
 {
   "name": "opencode-prompt-recorder",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "OpenCode plugin for recording user prompts. Automatically saves user messages to a local file system with organized directory structure.",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,7 +19,7 @@
   "scripts": {
     "build": "bun build index.ts --outdir dist --target node",
     "prepublishOnly": "bun run build",
-    "test": "bun test"
+    "test": "npx tsx test/index.ts"
   },
   "keywords": [
     "opencode",
