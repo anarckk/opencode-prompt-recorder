@@ -172,6 +172,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client: _clien
 
           // 格式化时间
           const time = formatTime(now)
+          const dateStr = `${yyyy}${MM}${dd}`
 
           // 根据是否有现有文件决定内容格式
           // 有现有文件：追加内容需要添加空行和新时间标题
@@ -186,7 +187,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client: _clien
             await appendFile(existingFile, fileContent)
           } else {
             // 创建新文件
-            const filename = `${HH}${mm}-${sessionId}-${topic}.md`
+            const filename = `${dateStr}-${HH}${mm}-${sessionId}-${topic}.md`
             const filepath = join(promptDir, filename)
             await appendFile(filepath, fileContent)
           }
