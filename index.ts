@@ -14,6 +14,17 @@ async function getVersion(): Promise<string> {
   }
 }
 
+function getLastUpdateTime(): string {
+  const now = new Date()
+  const yyyy = now.getFullYear()
+  const MM = String(now.getMonth() + 1).padStart(2, '0')
+  const dd = String(now.getDate()).padStart(2, '0')
+  const HH = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const ss = String(now.getSeconds()).padStart(2, '0')
+  return `${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`
+}
+
 /**
  * 过滤文件名中的非法字符，防止文件系统操作失败
  * @param str - 原始字符串（用户提示词内容）
@@ -112,6 +123,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client: _clien
       if (!versionFileWritten) {
         try {
           const version = await getVersion()
+          const lastUpdate = getLastUpdateTime()
           const readmeDir = join(directory, ".agent")
           const readmeFile = join(readmeDir, "opencode-prompt-recorder-readme.txt")
           const content = `# OpenCode Prompt Recorder
@@ -119,6 +131,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client: _clien
 自动记录用户提示词到 .agent/prompts 目录的插件。
 
 版本：${version}
+最后更新时间：${lastUpdate}
 作者：anarckk  
 项目地址：https://github.com/anarckk/opencode-prompt-recorder`
           
