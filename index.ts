@@ -14,6 +14,18 @@ async function getVersion(): Promise<string> {
   }
 }
 
+async function debugLog(directory: string, msg: string) {
+  const time = new Date().toISOString()
+  const logLine = `[${time}] ${msg}\n`
+  try {
+    const logDir = join(directory, ".agent", "prompts-log")
+    await mkdir(logDir, { recursive: true })
+    await appendFile(join(logDir, "log.txt"), logLine)
+  } catch (e) {
+    console.error("debugLog failed:", e)
+  }
+}
+
 function sanitizeFilename(str: string): string {
   return str.replace(/[<>:"/\\|?*\x00-\x1f]/g, '').substring(0, 50).trim()
 }
@@ -134,7 +146,10 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           }
 
           // 只有用户消息才保存
-          if (role === "user" && text && sessionID) {
+          if (!role) {
+            await debugLog(directory, `[prompt-recorder] WARNING: role not found, messageID=${messageID}, sessionID=${sessionID}, textPreview=${text.substring(0, 30)}`)
+          } else if (role === "user" && text && sessionID) {
+            await debugLog(directory, `[prompt-recorder] event=${event.type}, role=${role}, sessionID=${sessionID}, textLength=${text.length}, textPreview=${text.substring(0, 50)}`)
             const now = new Date()
             const { yyyy, MM, dd, HH, mm } = formatDate(now)
             const topic = sanitizeFilename(text)
