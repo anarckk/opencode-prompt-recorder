@@ -32,7 +32,7 @@ bun add -g opencode-prompt-recorder
 
 ## 工作原理
 
-1. 插件监听 OpenCode 聊天事件（`chat.message`）
+1. 插件监听 OpenCode 消息事件（`message.updated` 和 `message.part.updated`）
 2. 每次用户消息时，提取提示词文本和会话 ID
 3. 提示词保存到 `.agent/prompts/` 目录，按日期组织
 4. 每个提示词保存为带有时间戳和会话信息的 markdown 文件
@@ -45,11 +45,11 @@ bun add -g opencode-prompt-recorder
 .agent/
 └── prompts/
     └── 2026/
-        └── 02/
-            └── 22/
-                ├── 1005-abc123-什么是AI.md
-                ├── 1050-def456-如何编程.md
-                └── 1120-ghi789-复制README.md
+        └── 03/
+            └── 04/
+                ├── 20260304-0943-ses_abc123-什么是AI.md
+                ├── 20260304-1005-ses_def456-如何编程.md
+                └── 20260304-1120-ses_ghi789-复制README.md
 ```
 
 ## 文件格式
@@ -60,8 +60,6 @@ bun add -g opencode-prompt-recorder
 ============ 10:05 ============
 
 什么是 AI？
-
----
 
 ============ 10:50 ============
 
@@ -81,7 +79,7 @@ bun add -g opencode-prompt-recorder
 - 每个唯一的 `sessionId` 获得自己的文件
 - 相同的会话 ID 追加到现有文件
 - 不同的会话 ID 创建新文件
-- 会话 ID 来自 `chat.message` 事件输入
+- 会话 ID 来自 `message.part.updated` 事件输入
 - 跨天合并：无论何时，只要 sessionId 相同，都会追加到同一文件（自动搜索所有日期目录）
 
 ## 使用场景
