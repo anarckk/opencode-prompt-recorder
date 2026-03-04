@@ -5,15 +5,6 @@ import type { Plugin } from "@opencode-ai/plugin"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-async function getVersion(): Promise<string> {
-  try {
-    const packageJson = JSON.parse(await readFile(join(__dirname, "package.json"), "utf-8"))
-    return packageJson.version
-  } catch {
-    return "unknown"
-  }
-}
-
 async function debugLog(directory: string, msg: string) {
   const time = new Date().toISOString()
   const logLine = `[${time}] ${msg}\n`
@@ -23,6 +14,15 @@ async function debugLog(directory: string, msg: string) {
     await appendFile(join(logDir, "log.txt"), logLine)
   } catch (e) {
     console.error("debugLog failed:", e)
+  }
+}
+
+async function getVersion(): Promise<string> {
+  try {
+    const packageJson = JSON.parse(await readFile(join(__dirname, "package.json"), "utf-8"))
+    return packageJson.version
+  } catch {
+    return "unknown"
   }
 }
 
@@ -95,12 +95,12 @@ async function findExistingFile(directory: string, sessionId: string): Promise<s
  * 功能：
  * - 监听 message.updated 事件，获取用户发送的提示词
  * - 将提示词按日期保存到 .agent/prompts/yyyy/MM/dd/ 目录
- * - 文件名格式：HHmm-{会话id}-{提示词主题}.md
- * - 同一会话ID追加到现有文件，不同会话ID创建新文件
+ * - 文件名格式：yyyyMMdd-HHmm-{会话id}-{提示词主题}.md
+ * - 同一会话ID的所有消息追加到同一个文件（通过查找包含会话ID的文件实现）
  * - 文件内容格式：
  *   ============ {HH:mm} ============
  *   {用户提示词1}
- *   ---
+ *
  *   ============ {HH:mm} ============
  *   {用户提示词2}
  * 
@@ -113,6 +113,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
   let versionFileWritten = false
   let lastProcessedMessageCount = 0
   const messageRoleMap = new Map<string, string>()
+  const processedMessageIds = new Set<string>()
 
   return {
     "event": async ({ event }) => {
@@ -149,10 +150,16 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           if (!role) {
             await debugLog(directory, `[prompt-recorder] WARNING: role not found, messageID=${messageID}, sessionID=${sessionID}, textPreview=${text.substring(0, 30)}`)
           } else if (role === "user" && text && sessionID) {
+            // 去重：避免同一消息被多次处理
+            if (processedMessageIds.has(messageID)) {
+              return
+            }
+            processedMessageIds.add(messageID)
+            
             await debugLog(directory, `[prompt-recorder] event=${event.type}, role=${role}, sessionID=${sessionID}, textLength=${text.length}, textPreview=${text.substring(0, 50)}`)
+
             const now = new Date()
             const { yyyy, MM, dd, HH, mm } = formatDate(now)
-            const topic = sanitizeFilename(text)
             const promptDir = join(directory, ".agent", "prompts", yyyy, MM, dd)
 
             await mkdir(promptDir, { recursive: true })
@@ -169,6 +176,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
             if (existingFile) {
               await appendFile(existingFile, fileContent)
             } else {
+              const topic = sanitizeFilename(text)
               const filename = `${dateStr}-${HH}${mm}-${sessionID}-${topic}.md`
               const filepath = join(promptDir, filename)
               await appendFile(filepath, fileContent)
@@ -181,6 +189,10 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
       if (event.type !== "session.updated") {
         return
       }
+
+      await client?.app?.log?.({
+        body: { service: "prompt-recorder", level: "debug", message: "收到 session.updated 事件", extra: { eventType: event.type } },
+      })
 
       const messages = event.properties.info.messages
       const messageCount = messages.length
