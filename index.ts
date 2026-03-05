@@ -5,6 +5,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+
 async function debugLog(directory: string, msg: string) {
   const time = new Date().toISOString()
   const logLine = `[${time}] ${msg}\n`
@@ -109,11 +110,11 @@ async function findExistingFile(directory: string, sessionId: string): Promise<s
  * @returns 插件钩子对象
  */
 export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
-  let lastUserMessage: string = ""
   let versionFileWritten = false
-  let lastProcessedMessageCount = 0
   const messageRoleMap = new Map<string, string>()
   const processedMessageKeys = new Set<string>()
+
+
 
   return {
     "event": async ({ event }) => {
@@ -129,8 +130,6 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
       // 监听 message.part.updated 事件，提取用户提示词
       if (event.type === "message.part.updated") {
         const part = (event.properties as any).part
-        const props = event.properties as any
-        await debugLog(directory, `[prompt-recorder] message.part.updated: type=${part?.type}, messageID=${part?.messageID}, sessionID=${part?.sessionID}, info.role=${props.info?.role}, info.message.role=${props.info?.message?.role}`)
         if (part?.type === "text" && part?.text) {
           const sessionID = part.sessionID
           const messageID = part.messageID
@@ -149,9 +148,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           }
 
           // 只有用户消息才保存
-          if (!role) {
-            await debugLog(directory, `[prompt-recorder] WARNING: role not found, messageID=${messageID}, sessionID=${sessionID}, textPreview=${text.substring(0, 30)}`)
-          } else if (role === "user" && text && sessionID) {
+          if (role === "user" && text && sessionID) {
             // 去重：使用 messageID + text 组合作为key，避免并发重复
             const dedupeKey = `${messageID}:${text}`
             if (processedMessageKeys.has(dedupeKey)) {
@@ -188,19 +185,8 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
         }
       }
 
-      // 以下是原来的 session.updated 逻辑，暂时保留但不再使用
-      if (event.type !== "session.updated") {
-        return
-      }
-
-      const sessionInfo = event.properties.info as any
-      const sessionId = sessionInfo?.id
-      const messages = sessionInfo?.messages || []
-      const messageCount = messages.length
-      await debugLog(directory, `[prompt-recorder] session.updated: sessionId=${sessionId}, messageCount=${messageCount}, lastProcessed=${lastProcessedMessageCount}`)
-
-      // 写入readme文件（只写一次）
-      if (!versionFileWritten) {
+      // session.updated 事件 - 只写 readme 文件
+      if (event.type === "session.updated" && !versionFileWritten) {
         try {
           const version = await getVersion()
           const readmeDir = join(directory, ".agent")
@@ -213,7 +199,6 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
 作者：anarckk  
 项目地址：https://github.com/anarckk/opencode-prompt-recorder`
           
-          // 检查文件是否已存在且内容相同，避免重复写入
           try {
             const existing = await readFile(readmeFile, "utf-8")
             if (existing === content) {
@@ -231,58 +216,6 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           // 忽略readme文件写入错误
         }
       }
-
-      // 跳过没有新消息的情况
-      if (messageCount <= lastProcessedMessageCount) {
-        return
-      }
-
-      // 获取最新的用户消息
-      const latestMessage = messages[messages.length - 1]
-
-      if (latestMessage?.role !== "user") {
-        return
-      }
-
-      // 从 parts 中提取文本内容
-      const text = latestMessage.parts.map(p => p.type === "text" ? p.text : "").join("")
-
-      if (!text || !sessionId) {
-        return
-      }
-
-      // 避免重复处理
-      if (text === lastUserMessage) {
-        return
-      }
-
-      const now = new Date()
-      const { yyyy, MM, dd, HH, mm } = formatDate(now)
-      const topic = sanitizeFilename(text)
-      const promptDir = join(directory, ".agent", "prompts", yyyy, MM, dd)
-
-      await mkdir(promptDir, { recursive: true })
-
-      const existingFile = await findExistingFile(directory, sessionId)
-
-      const time = formatTime(now)
-      const dateStr = `${yyyy}${MM}${dd}`
-
-      const timeTitle = `============ ${time} ============`
-      const fileContent = existingFile
-        ? `\n\n${timeTitle}\n\n${text}`
-        : `${timeTitle}\n\n${text}`
-
-      if (existingFile) {
-        await appendFile(existingFile, fileContent)
-      } else {
-        const filename = `${dateStr}-${HH}${mm}-${sessionId}-${topic}.md`
-        const filepath = join(promptDir, filename)
-        await appendFile(filepath, fileContent)
-      }
-
-      lastUserMessage = text
-      lastProcessedMessageCount = messageCount
     }
   }
 }
