@@ -113,7 +113,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
   let versionFileWritten = false
   let lastProcessedMessageCount = 0
   const messageRoleMap = new Map<string, string>()
-  const processedMessageIds = new Set<string>()
+  const processedMessageKeys = new Set<string>()
 
   return {
     "event": async ({ event }) => {
@@ -129,6 +129,8 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
       // 监听 message.part.updated 事件，提取用户提示词
       if (event.type === "message.part.updated") {
         const part = (event.properties as any).part
+        const props = event.properties as any
+        await debugLog(directory, `[prompt-recorder] message.part.updated: type=${part?.type}, messageID=${part?.messageID}, sessionID=${part?.sessionID}, info.role=${props.info?.role}, info.message.role=${props.info?.message?.role}`)
         if (part?.type === "text" && part?.text) {
           const sessionID = part.sessionID
           const messageID = part.messageID
@@ -150,11 +152,12 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           if (!role) {
             await debugLog(directory, `[prompt-recorder] WARNING: role not found, messageID=${messageID}, sessionID=${sessionID}, textPreview=${text.substring(0, 30)}`)
           } else if (role === "user" && text && sessionID) {
-            // 去重：避免同一消息被多次处理
-            if (processedMessageIds.has(messageID)) {
+            // 去重：使用 messageID + text 组合作为key，避免并发重复
+            const dedupeKey = `${messageID}:${text}`
+            if (processedMessageKeys.has(dedupeKey)) {
               return
             }
-            processedMessageIds.add(messageID)
+            processedMessageKeys.add(dedupeKey)
             
             await debugLog(directory, `[prompt-recorder] event=${event.type}, role=${role}, sessionID=${sessionID}, textLength=${text.length}, textPreview=${text.substring(0, 50)}`)
 
@@ -190,12 +193,11 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
         return
       }
 
-      await client?.app?.log?.({
-        body: { service: "prompt-recorder", level: "debug", message: "收到 session.updated 事件", extra: { eventType: event.type } },
-      })
-
-      const messages = event.properties.info.messages
+      const sessionInfo = event.properties.info as any
+      const sessionId = sessionInfo?.id
+      const messages = sessionInfo?.messages || []
       const messageCount = messages.length
+      await debugLog(directory, `[prompt-recorder] session.updated: sessionId=${sessionId}, messageCount=${messageCount}, lastProcessed=${lastProcessedMessageCount}`)
 
       // 写入readme文件（只写一次）
       if (!versionFileWritten) {
@@ -244,7 +246,6 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
 
       // 从 parts 中提取文本内容
       const text = latestMessage.parts.map(p => p.type === "text" ? p.text : "").join("")
-      const sessionId = event.properties.info.id
 
       if (!text || !sessionId) {
         return
