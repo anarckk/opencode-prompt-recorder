@@ -7,6 +7,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 
 async function debugLog(directory: string, msg: string) {
+  if (process.env.PROMPT_RECORDER_DEBUG !== "1" && process.env.PROMPT_RECORDER_DEBUG !== "true") {
+    return
+  }
   const time = new Date().toISOString()
   const logLine = `[${time}] ${msg}\n`
   try {
