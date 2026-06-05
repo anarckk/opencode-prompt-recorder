@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execSync } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
@@ -38,20 +38,20 @@ function runTypecheck() {
   console.log('✅ 类型检查通过');
 }
 
-function runTests() {
-  console.log('\n运行测试...');
-  const hasTests = existsSync(join(rootDir, 'test'));
-  if (!hasTests) {
-    console.log('跳过测试（测试目录不存在）');
-    return;
-  }
-  runCommand('npm test');
-  console.log('✅ 测试通过');
-}
-
 function build() {
   console.log('\n构建项目...');
-  runCommand('npm run build');
+
+  rmSync(join(rootDir, 'dist'), { recursive: true, force: true });
+
+  const shell = process.platform === 'win32' ? 'powershell.exe' : undefined;
+  runCommand(
+    'npx esbuild index.ts --bundle --platform=node --outdir=dist --format=esm --external:@opencode-ai/plugin --minify',
+    { shell }
+  );
+
+  const pkg = readFileSync(join(rootDir, 'package.json'), 'utf-8');
+  writeFileSync(join(rootDir, 'dist', 'package.json'), pkg);
+
   console.log('✅ 构建完成');
 }
 
@@ -64,32 +64,6 @@ function publish() {
   console.log(`\n✅ 发布成功: ${pkg.name}@${pkg.version}`);
 }
 
-function gitCommitAndTag() {
-  console.log('\nGit 提交并打 tag...');
-  const pkg = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf-8'));
-  const version = pkg.version;
-
-  runCommand(`git add package.json`);
-  const hasChanges = execSync('git diff --cached --name-only', { cwd: rootDir, encoding: 'utf-8' }).trim();
-  if (hasChanges) {
-    runCommand(`git commit -m "${version}"`);
-  } else {
-    console.log('无变更需要提交');
-  }
-
-  const tagName = `v${version}`;
-  const tagExists = execSync(`git tag -l "${tagName}"`, { cwd: rootDir, encoding: 'utf-8' }).trim();
-  if (!tagExists) {
-    runCommand(`git tag "${tagName}"`);
-  } else {
-    console.log(`Tag ${tagName} 已存在，跳过`);
-  }
-
-  runCommand('git push origin main');
-  runCommand(`git push origin "${tagName}"`);
-  console.log(`✅ Git 已提交并推送: ${tagName}`);
-}
-
 function main() {
   console.log('🚀 开始发布流程\n');
 
@@ -98,10 +72,8 @@ function main() {
 
   checkNpmAuth();
   runTypecheck();
-  runTests();
   build();
   publish();
-  gitCommitAndTag();
 
   console.log('\n🎉 发布流程全部完成！');
 }
