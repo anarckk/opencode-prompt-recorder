@@ -30,8 +30,17 @@ async function getVersion(): Promise<string> {
   }
 }
 
+const ILLEGAL_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
+
 function sanitizeFilename(str: string): string {
-  return str.replace(/[<>:"/\\|?*\x00-\x1f]/g, '').substring(0, 50).trim()
+  const firstLine = str.split('\n')[0].trim()
+  const cleaned = firstLine.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+  const result = cleaned.replace(ILLEGAL_FILENAME_CHARS, '').substring(0, 40).trim()
+  return result || 'untitled'
+}
+
+function isSystemInjected(text: string): boolean {
+  return /^\s*<(system-reminder|system)>/.test(text)
 }
 
 /**
@@ -63,34 +72,32 @@ function formatTime(date: Date): string {
  * @param sessionId - 会话ID
  * @returns 找到的文件路径，未找到则返回 null
  */
-async function findExistingFile(directory: string, sessionId: string): Promise<string | null> {
+async function findExistingFile(promptsBaseDir: string, sessionId: string): Promise<string | null> {
   if (!sessionId) return null
 
-  const promptsBaseDir = join(directory, ".agent", "prompts")
-
-  try {
-    const years = await readdir(promptsBaseDir)
-    for (const year of years) {
-      const yearPath = join(promptsBaseDir, year)
-      const months = await readdir(yearPath)
-      for (const month of months) {
-        const monthPath = join(yearPath, month)
-        const days = await readdir(monthPath)
-        for (const day of days) {
-          const dayPath = join(monthPath, day)
-          const files = await readdir(dayPath)
-          for (const file of files) {
-            if (file.includes(`-${sessionId}-`)) {
-              return join(dayPath, file)
-            }
-          }
+  async function searchDir(dir: string, skipTask: boolean): Promise<string | null> {
+    try {
+      const entries = await readdir(dir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (skipTask && entry.name === "task") continue
+          const found = await searchDir(join(dir, entry.name), skipTask)
+          if (found) return found
+        } else if (entry.isFile() && entry.name.includes(`-${sessionId}-`)) {
+          return join(dir, entry.name)
         }
       }
+    } catch {
+      // ignore
     }
-  } catch {
-    // 目录不存在时返回 null
+    return null
   }
-  return null
+
+  const found = await searchDir(promptsBaseDir, true)
+  if (found) return found
+
+  const taskDir = join(promptsBaseDir, "task")
+  return searchDir(taskDir, false)
 }
 
 /**
@@ -116,8 +123,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
   let versionFileWritten = false
   const messageRoleMap = new Map<string, string>()
   const processedMessageKeys = new Set<string>()
-
-
+  let mainSessionId: string | null = null
 
   return {
     "event": async ({ event }) => {
@@ -137,7 +143,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           const sessionID = part.sessionID
           const messageID = part.messageID
           const text = part.text
-          
+
           // 尝试多种方式获取 role
           let role = messageRoleMap.get(messageID)
           if (!role) {
@@ -152,22 +158,40 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
 
           // 只有用户消息才保存
           if (role === "user" && text && sessionID) {
+            // 过滤系统注入内容（如 haimati 的 <system-reminder>）
+            if (isSystemInjected(text)) {
+              await debugLog(directory, `[prompt-recorder] filtered system-injected: sessionID=${sessionID}`)
+              return
+            }
+
             // 去重：使用 messageID + text 组合作为key，避免并发重复
             const dedupeKey = `${messageID}:${text}`
             if (processedMessageKeys.has(dedupeKey)) {
               return
             }
             processedMessageKeys.add(dedupeKey)
-            
+
             await debugLog(directory, `[prompt-recorder] event=${event.type}, role=${role}, sessionID=${sessionID}, textLength=${text.length}, textPreview=${text.substring(0, 50)}`)
+
+            // 记录主会话ID（第一条用户消息所属的会话）
+            if (!mainSessionId) {
+              mainSessionId = sessionID
+            }
 
             const now = new Date()
             const { yyyy, MM, dd, HH, mm } = formatDate(now)
-            const promptDir = join(directory, ".agent", "prompts", yyyy, MM, dd)
+            const promptsBaseDir = join(directory, ".agent", "prompts")
+
+            // 子 agent（task 工具）的提示词存入 task/ 子目录，避免碎片化
+            const isTaskSession = sessionID !== mainSessionId && mainSessionId !== null
+            const promptDir = isTaskSession
+              ? join(promptsBaseDir, "task", yyyy, MM, dd)
+              : join(promptsBaseDir, yyyy, MM, dd)
 
             await mkdir(promptDir, { recursive: true })
 
-            const existingFile = await findExistingFile(directory, sessionID)
+            const searchBase = isTaskSession ? join(promptsBaseDir, "task") : promptsBaseDir
+            const existingFile = await findExistingFile(searchBase, sessionID)
             const time = formatTime(now)
             const dateStr = `${yyyy}${MM}${dd}`
 
@@ -201,7 +225,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
 版本：${version}
 作者：anarckk  
 项目地址：https://github.com/anarckk/opencode-prompt-recorder`
-          
+
           try {
             const existing = await readFile(readmeFile, "utf-8")
             if (existing === content) {
@@ -211,7 +235,7 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
           } catch {
             // 文件不存在，继续写入
           }
-          
+
           await mkdir(readmeDir, { recursive: true })
           await writeFile(readmeFile, content)
           versionFileWritten = true
