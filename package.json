@@ -5,12 +5,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     }
   },
   "files": [
@@ -44,8 +42,7 @@
   },
   "homepage": "https://github.com/anarckk/opencode-prompt-recorder#readme",
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=0.15.0",
-    "typescript": ">=5.0.0"
+    "@opencode-ai/plugin": ">=0.15.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^0.15.0",

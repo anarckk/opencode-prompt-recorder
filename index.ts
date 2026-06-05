@@ -66,7 +66,7 @@ function formatDate(date: Date): { yyyy: string; MM: string; dd: string; HH: str
  * - 监听 message.updated 事件，获取用户发送的提示词
  * - 将提示词按日期保存到 .agent/prompts/yyyy/MM/dd/ 目录
  * - 同一 session 的消息合并到同一个文件，文件以首条消息主题命名
- * - 文件名格式：yyMMddHHmm-{提示词主题}.md
+ * - 文件名格式：yyMMddHHmm-{topic}.md
  * - 文件内容格式：
  *   ============ SessionID: {sessionID} ============
  *   ============ {yyyy-MM-dd HH:mm} ============
@@ -80,12 +80,21 @@ function formatDate(date: Date): { yyyy: string; MM: string; dd: string; HH: str
  */
 export const OpenCodePromptRecorder: Plugin = async (ctx) => {
   startAutoUpdate(ctx, true)
-  const { directory, client } = ctx
+  const { directory } = ctx
   let versionFileWritten = false
   const messageRoleMap = new Map<string, string>()
   const processedMessageKeys = new Set<string>()
-  let mainSessionId: string | null = null
-  const sessionFileCache = new Map<string, string>()
+  const taskSessionIds = new Set<string>()
+  const CACHE_MAX_IDLE_MS = 24 * 60 * 60 * 1000
+  const CACHE_MAX_SIZE = 200
+  const sessionFileCache = new Map<string, { filepath: string; time: number }>()
+  function pruneCache() {
+    if (sessionFileCache.size < CACHE_MAX_SIZE) return
+    const now = Date.now()
+    for (const [k, v] of sessionFileCache) {
+      if (now - v.time > CACHE_MAX_IDLE_MS) sessionFileCache.delete(k)
+    }
+  }
 
   return {
     "event": async ({ event }) => {
@@ -101,6 +110,16 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
       // 监听 message.part.updated 事件，提取用户提示词
       if (event.type === "message.part.updated") {
         const part = (event.properties as any).part
+        if (part?.type === "tool" && part?.tool === "task") {
+          const stateMetadata = part.state?.metadata ?? part.metadata
+          if (stateMetadata) {
+            const childId: string | undefined = stateMetadata.sessionId ?? stateMetadata.sessionID
+            if (childId) {
+              taskSessionIds.add(childId)
+              await debugLog(directory, `[prompt-recorder] tracked task session: ${childId}`)
+            }
+          }
+        }
         if (part?.type === "text" && part?.text) {
           // 跳过 synthetic 部件（海马体等插件注入的系统提示）和 ignored 部件（仅用户可见的通知）
           if (part.synthetic || part.ignored) {
@@ -140,17 +159,12 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
 
             await debugLog(directory, `[prompt-recorder] event=${event.type}, role=${role}, sessionID=${sessionID}, textLength=${text.length}, textPreview=${text.substring(0, 50)}`)
 
-            // 记录主会话ID（第一条用户消息所属的会话）
-            if (!mainSessionId) {
-              mainSessionId = sessionID
-            }
-
             const now = new Date()
             const { yyyy, MM, dd, HH, mm } = formatDate(now)
             const promptsBaseDir = join(directory, ".agent", "prompts")
 
             // 子 agent（task 工具）的提示词存入 task/ 子目录，避免碎片化
-            const isTaskSession = sessionID !== mainSessionId && mainSessionId !== null
+            const isTaskSession = taskSessionIds.has(sessionID)
             const promptDir = isTaskSession
               ? join(promptsBaseDir, "task", yyyy, MM, dd)
               : join(promptsBaseDir, yyyy, MM, dd)
@@ -162,16 +176,18 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
             const timeTitle = `============ ${yyyy}-${MM}-${dd} ${HH}:${mm} ============`
 
             // 同一 session 的消息合并到同一个文件
-            let filepath = sessionFileCache.get(sessionID)
-            if (filepath) {
-              await appendFile(filepath, `\n\n${timeTitle}\n\n${text}`)
+            const cached = sessionFileCache.get(sessionID)
+            if (cached) {
+              cached.time = Date.now()
+              await appendFile(cached.filepath, `\n\n${timeTitle}\n\n${text}`)
             } else {
               const topic = sanitizeFilename(text)
               const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}.md`
-              filepath = join(promptDir, filename)
+              const filepath = join(promptDir, filename)
               const sessionHeader = `============ SessionID: ${sessionID} ============`
               await writeFile(filepath, `${sessionHeader}\n\n${timeTitle}\n\n${text}`)
-              sessionFileCache.set(sessionID, filepath)
+              sessionFileCache.set(sessionID, { filepath, time: Date.now() })
+              pruneCache()
             }
           }
         }

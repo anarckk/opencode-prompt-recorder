@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>opencode-prompt-recorder 功能设计</title>
+<script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+(function() {
+  var mode = localStorage.getItem('theme') || 'auto';
+  var isDark = false;
+  if (mode === 'auto') {
+    isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  } else {
+    isDark = mode === 'dark';
+  }
+  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  document.documentElement.setAttribute('data-mode', mode);
+  function tryInit() {
+    if (typeof mermaid !== 'undefined') {
+      mermaid.initialize({ theme: isDark ? 'dark' : 'default' });
+      mermaid.run();
+    } else {
+      setTimeout(tryInit, 200);
+    }
+  }
+  tryInit();
+})();
+</script>
+<link rel="stylesheet" href="https://raw.giteeusercontent.com/anarckk/agents/raw/master/模板/html格式化文档模板.css">
+</head>
+<body>
+
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <h2>📖 目录</h2>
+    <button class="theme-btn" onclick="toggleTheme()" title="切换主题" id="themeBtn" aria-label="切换主题">☀️</button>
+  </div>
+  <ul>
+    <li><a href="#overview" class="l2 active">一、概述</a></li>
+    <li><a href="#design" class="l2">二、功能设计</a></li>
+    <li><a href="#design-goals" class="l3">2.1 设计目标与原则</a></li>
+    <li><a href="#requirements" class="l3">2.2 需求分析</a></li>
+    <li><a href="#decisions" class="l3">2.3 方案选型与权衡</a></li>
+    <li><a href="#rejected" class="l3">2.4 被拒绝的替代方案</a></li>
+    <li><a href="#errors" class="l3">2.5 错误处理策略</a></li>
+    <li><a href="#edge-cases" class="l3">2.6 边界情况处理</a></li>
+    <li><a href="#architecture" class="l2">三、架构设计</a></li>
+    <li><a href="#event-driven" class="l3">3.1 事件驱动模型</a></li>
+    <li><a href="#dataflow" class="l3">3.2 核心数据流</a></li>
+  </li>
+  </ul>
+</nav>
+
+<main class="main">
+
+  <h1>opencode-prompt-recorder 功能设计</h1>
+    <p class="subtitle">OpenCode 插件 —— 自动记录用户提示词到本地文件系统</p>
+
+  <section id="overview">
+    <h2>一、概述</h2>
+    <p><strong>opencode-prompt-recorder</strong> 是一个为 OpenCode AI 编程助手设计的插件，核心功能是<strong>自动捕获并持久化用户在聊天对话中发送的提示词</strong>到本地文件系统。它作为审计日志、训练数据收集和会话历史工具，无需用户任何手动操作即可后台静默运行。</p>
+
+    <div class="info-box">
+      <strong>💡 项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp; 版本：<code>1.7.5</code> &nbsp;|&nbsp; 作者：<code>anarckk</code> &nbsp;|&nbsp; 许可：MIT
+    </div>
+
+    <h3>核心价值</h3>
+    <ul>
+      <li><strong>审计追踪</strong>：完整记录每一次与 AI 的交互过程，便于事后回溯</li>
+      <li><strong>训练数据收集</strong>：积累真实用户提示词，可用于模型微调或 prompt 工程优化</li>
+      <li><strong>会话恢复</strong>：对话按时间组织，便于回溯</li>
+      <li><strong>零配置</strong>：安装即用，无需额外设置</li>
+    </ul>
+
+    <h3>技术概要</h3>
+    <table>
+      <tr><th>维度</th><th>说明</th></tr>
+      <tr><td>编程语言</td><td>TypeScript (ES2022)</td></tr>
+      <tr><td>运行时</td><td>Node.js / Bun</td></tr>
+      <tr><td>依赖</td><td>仅 peer dependency：<code>@opencode-ai/plugin &gt;=0.15.0</code></td></tr>
+      <tr><td>代码规模</td><td>单文件 ~220 行，零外部运行时依赖</td></tr>
+      <tr><td>构建工具</td><td>esbuild</td></tr>
+      <tr><td>包管理</td><td>npm 发布，ESM 模块</td></tr>
+    </table>
+  </section>
+
+  <section id="design">
+    <h2>二、功能设计</h2>
+
+    <h3 id="design-goals">2.1 设计目标与原则</h3>
+    <p>插件的设计围绕以下核心目标展开：</p>
+    <table>
+      <tr><th>目标</th><th>优先级</th><th>说明</th></tr>
+      <tr><td>零配置</td><td>P0</td><td>安装即用，用户无需任何配置即可开始记录</td></tr>
+      <tr><td>零侵入</td><td>P0</td><td>不干扰 OpenCode 正常运行，不修改用户数据</td></tr>
+      <tr><td>数据安全</td><td>P0</td><td>不联网，所有数据仅存本地文件系统</td></tr>
+      <tr><td>可靠性</td><td>P1</td><td>不丢消息，不重复记录</td></tr>
+      <tr><td>可读性</td><td>P2</td><td>存储格式直接可读，无需工具解析</td></tr>
+      <tr><td>最小依赖</td><td>P1</td><td>零运行时依赖，仅 peer dependency</td></tr>
+    </table>
+
+    <p>设计原则：</p>
+    <ul>
+      <li><strong>简单至上</strong>：能用 Map 不用数据库，能单文件不拆分模块</li>
+      <li><strong>被动监听</strong>：不主动轮询，完全依赖 OpenCode 事件驱动</li>
+      <li><strong>快速失败</strong>：前置条件不满足时立即返回，不执行不必要的 IO</li>
+      <li><strong>防御性编程</strong>：对事件 payload 做多层 fallback 解析，适应 OpenCode 版本变化</li>
+    </ul>
+
+    <h3 id="requirements">2.2 需求分析</h3>
+
+    <h4>功能需求</h4>
+    <table>
+      <tr><th>ID</th><th>需求</th><th>说明</th></tr>
+      <tr><td>F1</td><td>自动捕获</td><td>用户发送提示词后自动保存，无需手动操作</td></tr>
+      <tr><td>F2</td><td>按时间组织</td><td>文件按 yyyy/MM/dd 目录分层，文件名包含时间戳</td></tr>
+      <tr><td>F3</td><td>会话聚合</td><td>同一会话的多条消息合并到同一文件，以首条主题命名</td></tr>
+      <tr><td>F4</td><td>角色过滤</td><td>仅记录用户消息，忽略 AI 回复和系统消息</td></tr>
+      <tr><td>F5</td><td>去重</td><td>同一消息不被重复保存</td></tr>
+      <tr><td>F6</td><td>文件名净化</td><td>特殊字符自动清理，防止文件系统错误</td></tr>
+      <tr><td>F7</td><td>系统内容过滤</td><td>跳过他方插件注入的系统提示</td></tr>
+      <tr><td>F8</td><td>Task 子会话分离</td><td>task 工具的子 agent 提示词存入独立目录</td></tr>
+    </table>
+
+    <h4>非功能需求</h4>
+    <table>
+      <tr><th>ID</th><th>需求</th><th>约束</th></tr>
+      <tr><td>NF1</td><td>性能</td><td>单次 IO < 10ms，不阻塞事件循环</td></tr>
+      <tr><td>NF2</td><td>兼容性</td><td>支持 OpenCode v0.15.0+，Node.js ≥18 / Bun</td></tr>
+      <tr><td>NF3</td><td>零依赖</td><td>运行时无 npm 依赖，降低供应链风险</td></tr>
+      <tr><td>NF4</td><td>跨平台</td><td>Windows / macOS / Linux 文件路径兼容</td></tr>
+    </table>
+
+    <h3 id="decisions">2.3 方案选型与权衡</h3>
+    <p>以下是关键设计决策的选型分析：</p>
+
+    <h4>决策 1：单文件 vs 多模块</h4>
+    <table>
+      <tr><th></th><th>单文件（选中）</th><th>多模块拆分</th></tr>
+      <tr><td>优点</td><td>零模块加载开销；重构时全局可见；引入简单</td><td>关注点分离；便于单元测试</td></tr>
+      <tr><td>缺点</td><td>函数间隐式耦合</td><td>需要模块间接口定义；构建产物膨胀</td></tr>
+      <tr><td>结论</td><td colspan="2">代码 ~220 行，拆分反而增加心智负担。单文件更适合小型插件</td></tr>
+    </table>
+
+    <h4>决策 2：闭包模式 vs Class</h4>
+    <table>
+      <tr><th></th><th>函数闭包（选中）</th><th>Class 实例</th></tr>
+      <tr><td>优点</td><td>与 Plugin 工厂函数自然匹配；无 this 绑定问题</td><td>更熟悉的面相对象模式</td></tr>
+      <tr><td>缺点</td><td>不支持继承扩展</td><td>需要 new 实例化，与 Plugin 类型签名不完全匹配</td></tr>
+      <tr><td>结论</td><td colspan="2">闭包模式是 OpenCode 插件系统的首选，也是官方示例采用的风格</td></tr>
+    </table>
+
+    <h4>决策 3：文件系统 vs 嵌入式数据库</h4>
+    <table>
+      <tr><th></th><th>文件系统（选中）</th><th>SQLite / LevelDB</th></tr>
+      <tr><td>优点</td><td>零外部依赖；任何编辑器可直接查看；目录结构天然可浏览</td><td>结构化查询；高效全文检索</td></tr>
+      <tr><td>缺点</td><td>不具备查询能力；大规模文件时性能下降</td><td>引入数百 KB 原生依赖；破坏零依赖原则</td></tr>
+      <tr><td>结论</td><td colspan="2">数据量级（每日数十条文本）不需要数据库。可读性优先于可查询性</td></tr>
+    </table>
+
+    <h4>决策 4：单一事件处理器 vs 多个独立钩子</h4>
+    <table>
+      <tr><th></th><th>统一 event 钩子（选中）</th><th>多个独立钩子（message.updated 等）</th></tr>
+      <tr><td>优点</td><td>状态共享在同一闭包作用域；减少注册代码</td><td>职责清晰；每种事件独立处理</td></tr>
+      <tr><td>缺点</td><td>一个函数内处理所有事件类型，体量增大</td><td>需要跨钩子共享状态（通过 ctx 或外部变量）</td></tr>
+      <tr><td>结论</td><td colspan="2">事件类型仅 3 种，统一处理器足够简洁。若扩展到 10+ 事件类型则应拆分</td></tr>
+    </table>
+
+    <h4>决策 5：会话合并 vs 每条消息独立文件</h4>
+    <table>
+      <tr><th></th><th>同会话合并（选中）</th><th>每条消息独立文件</th></tr>
+      <tr><td>优点</td><td>文件数与会话数正相关，而非消息数；一次会话一个文件，便于回溯</td><td>实现简单；无状态</td></tr>
+      <tr><td>缺点</td><td>需要 sessionFileCache 维护状态；并发追加有竞态风险</td><td>碎片文件多；翻阅困难</td></tr>
+      <tr><td>结论</td><td colspan="2">一次对话通常包含 5-20 条消息，合并后降低碎片化，提升可读性</td></tr>
+    </table>
+
+    <h4>决策 6：消息去重 key 设计</h4>
+    <table>
+      <tr><th></th><th>messageID + text 组合（选中）</th><th>仅 messageID</th></tr>
+      <tr><td>优点</td><td>防御 messageID 不变但内容变化的极端情况</td><td>更少的字符串拼接</td></tr>
+      <tr><td>缺点</td><td>key 较长；增加内存占用</td><td>假设 messageID 全局唯一且内容不变</td></tr>
+      <tr><td>结论</td><td colspan="2">组合 key 更保守。内存开销可忽略（单个 key &lt; 1KB）</td></tr>
+    </table>
+
+    <h4>决策 7：Task 子会话识别策略（迭代演进）</h4>
+    <table>
+      <tr><th></th><th>v1：mainSessionId 比较（已废弃）</th><th>v2：ToolPart metadata 追踪（当前）</th></tr>
+      <tr><td>原理</td><td>首条用户消息的 session 为 "主会话"，不同的视为 task</td><td>监听 task 工具 ToolPart 的 metadata.sessionId</td></tr>
+      <tr><td>问题</td><td>新对话 session 变化后被误判为 task</td><td>依赖 metadata 到达时序，但实践经验中可靠</td></tr>
+      <tr><td>结论</td><td colspan="2">v2 方案与 OpenCode 自身追踪子 session 的方式一致（subagent-data.ts:316-339），更精准</td></tr>
+    </table>
+
+    <h3 id="rejected">2.4 被拒绝的替代方案</h3>
+    <table>
+      <tr><th>方案</th><th>拒绝原因</th></tr>
+      <tr><td>SQLite 存储</td><td>引入原生依赖，破坏零依赖原则；增加构建复杂度</td></tr>
+      <tr><td>JSON / YAML 格式</td><td>不如 Markdown 直接可读，需要额外工具查看</td></tr>
+      <tr><td>轮询式数据采集</td><td>违背 OpenCode 插件的设计规范（应被动监听）</td></tr>
+      <tr><td>网络上报（中心化收集）</td><td>数据安全不可接受；用户期望数据存本地</td></tr>
+      <tr><td>通过 chat.message 钩子拦截</td><td>会修改消息流，违背零侵入原则。改用 message.part.updated 只读监听</td></tr>
+      <tr><td>正则解析角色（从消息内容推断）</td><td>不可靠。改用事件的 role 字段 + 多层 fallback</td></tr>
+    </table>
+
+    <h3 id="errors">2.5 错误处理策略</h3>
+    <table>
+      <tr><th>场景</th><th>策略</th></tr>
+      <tr><td>目录创建失败</td><td>异常传播到事件循环，OpenCode 自动重试</td></tr>
+      <tr><td>文件写入失败</td><td>同上</td></tr>
+      <tr><td>package.json 读取失败</td><td>版本回退为 "unknown"</td></tr>
+      <tr><td>readme 文件写入失败</td><td>静默忽略，不影响主功能</td></tr>
+      <tr><td>debug log 写入失败</td><td>console.error 报告，不抛异常</td></tr>
+      <tr><td>事件 payload 缺少字段</td><td>多层 fallback 逐级尝试，全部失败则跳过</td></tr>
+      <tr><td>synthetic / ignored 部件误入</td><td>主动跳过，避免记录非用户内容</td></tr>
+    </table>
+
+    <h3 id="edge-cases">2.6 边界情况处理</h3>
+    <table>
+      <tr><th>场景</th><th>处理方式</th></tr>
+      <tr><td>空文本提示词</td><td>跳过，不写入</td></tr>
+      <tr><td>纯空白 / 特殊字符文件名</td><td>回退为 "untitled"</td></tr>
+      <tr><td>超长提示词（&gt;40 字符）</td><td>截断至 40 字符作为文件名</td></tr>
+      <tr><td>系统注入标签（海马体等）</td><td>isSystemInjected() 检测并跳过</td></tr>
+      <tr><td>并发消息事件</td><td>通过 processedMessageKeys 去重</td></tr>
+      <tr><td>跨天会话</td><td>时间戳含日期（yyyy-MM-dd HH:mm），按首次消息日期分目录</td></tr>
+      <tr><td>消息包含 HTML 标签</td><td>sanitizeFilename 剔除 &lt;...&gt;</td></tr>
+      <tr><td>Windows 非法文件名字符</td><td>正则替换 <code>&lt;&gt;:"/\|?*</code> 及控制字符</td></tr>
+      <tr><td>插件进程重启</td><td>去重 Set 清空，但文件追加写入不会产生重复</td></tr>
+      <tr><td>OpenCode 版本升级导致事件结构变化</td><td>四级 role fallback 保持兼容</td></tr>
+    </table>
+  </section>
+
+  <section id="architecture">
+    <h2>三、架构设计</h2>
+    <p>插件采用<strong>事件驱动 + 函数式闭包</strong>的架构模式。整个插件是一个符合 <code>@opencode-ai/plugin</code> 的 <code>Plugin</code> 接口的工厂函数，内部使用 JavaScript 闭包来维护运行时状态。</p>
+
+    <h3 id="event-driven">3.1 事件驱动模型</h3>
+    <p>插件注册一个统一的 <code>event</code> 异步处理器，监听三种事件类型：</p>
+    <table>
+      <tr><th>事件类型</th><th>触发时机</th><th>处理动作</th></tr>
+      <tr><td><code>message.updated</code></td><td>消息元数据更新时</td><td>提取 <code>messageID to role</code> 映射存入 Map，供后续事件使用</td></tr>
+      <tr><td><code>message.part.updated</code></td><td>消息内容部分更新时</td><td>核心逻辑：检测 task、检查 role、去重、按 session 缓存写入或追加</td></tr>
+      <tr><td><code>session.updated</code></td><td>会话更新时</td><td>写入版本化的 readme 文件（仅首次触发）</td></tr>
+    </table>
+
+    <div class="mermaid-container">
+      <pre class="mermaid">
+sequenceDiagram
+    participant OC as OpenCode Runtime
+    participant PR as Plugin
+    participant FS as File System
+
+    OC->>PR: message.updated
+    Note over PR: cache role map
+
+    OC->>PR: message.part.updated (type=text, role=user)
+    Note over PR: filter → dedup → lookup cache
+    alt first message in session
+        PR->>FS: mkdir + writeFile(session header)
+    else subsequent messages
+        PR->>FS: appendFile(time header + text)
+    end
+
+    OC->>PR: message.part.updated (type=tool, tool=task)
+    Note over PR: track child sessionId
+
+    OC->>PR: session.updated
+    Note over PR: write version readme (once)
+      </pre>
+      <div class="caption">图 1：插件事件处理全景</div>
+    </div>
+
+    <h3 id="dataflow">3.2 核心数据流</h3>
+    <p>一次完整的用户提示词录制过程：</p>
+
+    <div class="mermaid-container">
+      <pre class="mermaid">
+flowchart TD
+    E[message.part.updated] --> T{part.type?}
+    T -->|tool + task| M[提取 metadata.sessionId]
+    M --> S[加入 taskSessionIds Set]
+    T -->|text| F{role === user?}
+    F -->|No| Skip[跳过]
+    F -->|Yes| Sys{synthetic/ignored?}
+    Sys -->|Yes| Skip
+    Sys -->|No| Inj{isSystemInjected?}
+    Inj -->|Yes| Skip
+    Inj -->|No| D{已去重?}
+    D -->|Yes| Skip
+    D -->|No| C{有缓存文件?}
+    C -->|No| N[创建新文件]
+    C -->|Yes| A[追加到现有文件]
+      </pre>
+      <div class="caption">图 2：消息处理决策流</div>
+    </div>
+
+    <p>关键设计决策回顾（详见 2.3 节）：</p>
+    <ul>
+      <li><strong>仅录制用户消息</strong>：通过 <code>role === "user"</code> 过滤，忽略 AI 回复和系统消息</li>
+      <li><strong>快速失败</strong>：前置条件不满足时立即返回，不执行文件操作</li>
+      <li><strong>延迟写入</strong>：先做所有检查和查找，最后一次性写入</li>
+      <li><strong>会话缓存</strong>：sessionFileCache 避免重复目录计算和 IO</li>
+    </ul>
+  </section>
+
+  </section>
+
+</main>
+
+<button id="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="回到顶部">↑</button>
+
+<div class="mermaid-modal" id="mermaidModal">
+  <span class="modal-close" id="zoomClose">&#10005;</span>
+  <div class="modal-body" id="modalBody">
+    <div class="zoom-pane" id="zoomPane"></div>
+  </div>
+  <div class="modal-caption" id="zoomCaption"></div>
+</div>
+
+<script src="https://raw.giteeusercontent.com/anarckk/agents/raw/master/模板/html格式化文档模板.js"></script>
+
+</body>
+</html>
