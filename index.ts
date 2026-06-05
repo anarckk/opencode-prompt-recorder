@@ -60,15 +60,6 @@ function formatDate(date: Date): { yyyy: string; MM: string; dd: string; HH: str
 }
 
 /**
- * 格式化时间为 HH:mm 格式
- * @param date - JavaScript Date 对象
- * @returns 格式化后的时间字符串
- */
-function formatTime(date: Date): string {
-  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
-}
-
-/**
  * OpenCode 插件：自动记录用户提示词到文件
  * 
  * 功能：
@@ -78,10 +69,10 @@ function formatTime(date: Date): string {
  * - 文件名格式：yyMMddHHmm-{提示词主题}.md
  * - 文件内容格式：
  *   ============ SessionID: {sessionID} ============
- *   ============ {HH:mm} ============
+ *   ============ {yyyy-MM-dd HH:mm} ============
  *   {用户提示词1}
  *
- *   ============ {HH:mm} ============
+ *   ============ {yyyy-MM-dd HH:mm} ============
  *   {用户提示词2}
  * 
  * @param ctx - 插件上下文（包含 directory 和 client）
@@ -111,8 +102,8 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
       if (event.type === "message.part.updated") {
         const part = (event.properties as any).part
         if (part?.type === "text" && part?.text) {
-          // 跳过 synthetic 部件（海马体等插件注入的系统提示）
-          if (part.synthetic) {
+          // 跳过 synthetic 部件（海马体等插件注入的系统提示）和 ignored 部件（仅用户可见的通知）
+          if (part.synthetic || part.ignored) {
             return
           }
 
@@ -166,10 +157,9 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
 
             await mkdir(promptDir, { recursive: true })
 
-            const time = formatTime(now)
             const yy = yyyy.slice(-2)
 
-            const timeTitle = `============ ${time} ============`
+            const timeTitle = `============ ${yyyy}-${MM}-${dd} ${HH}:${mm} ============`
 
             // 同一 session 的消息合并到同一个文件
             let filepath = sessionFileCache.get(sessionID)
