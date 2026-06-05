@@ -57,7 +57,7 @@
 <main class="main">
 
   <h1>opencode-prompt-recorder 功能设计与实现原理</h1>
-  <p class="subtitle">OpenCode 插件 —— 自动记录用户提示词到本地文件系统</p>
+    <p class="subtitle">OpenCode 插件 —— 自动记录用户提示词到本地文件系统（会话合并）</p>
 
   <section id="overview">
     <h2>一、概述</h2>
@@ -81,7 +81,7 @@
       <tr><td>编程语言</td><td>TypeScript (ES2022)</td></tr>
       <tr><td>运行时</td><td>Node.js / Bun</td></tr>
       <tr><td>依赖</td><td>仅 peer dependency：<code>@opencode-ai/plugin &gt;=0.15.0</code></td></tr>
-      <tr><td>代码规模</td><td>单文件 207 行，零外部运行时依赖</td></tr>
+      <tr><td>代码规模</td><td>单文件 226 行，零外部运行时依赖</td></tr>
       <tr><td>构建工具</td><td>Bun / esbuild</td></tr>
       <tr><td>包管理</td><td>npm 发布，ESM 模块</td></tr>
     </table>
@@ -96,14 +96,14 @@
     <table>
       <tr><th>事件类型</th><th>触发时机</th><th>处理动作</th></tr>
       <tr><td><code>message.updated</code></td><td>消息元数据更新时</td><td>提取 <code>messageID to role</code> 映射存入 Map，供后续事件使用</td></tr>
-      <tr><td><code>message.part.updated</code></td><td>消息内容部分更新时</td><td>核心逻辑：检查 role、去重、查找文件、写入</td></tr>
+      <tr><td><code>message.part.updated</code></td><td>消息内容部分更新时</td><td>核心逻辑：检查 role、去重、按 session 缓存写入或追加</td></tr>
       <tr><td><code>session.updated</code></td><td>会话更新时</td><td>写入版本化的 readme 文件（仅首次触发）</td></tr>
     </table>
 
     <p>这种设计的主要优势：</p>
     <ul>
       <li><strong>松耦合</strong>：每种事件独立处理，互不干扰</li>
-      <li><strong>状态隔离</strong>：闭包内的 messageRoleMap、processedMessageKeys、versionFileWritten 为每个插件实例私有</li>
+      <li><strong>状态隔离</strong>：闭包内的 messageRoleMap、processedMessageKeys、versionFileWritten、sessionFileCache 为每个插件实例私有</li>
       <li><strong>被动监听</strong>：无需轮询或主动调用，完全由 OpenCode 运行时驱动</li>
     </ul>
 
@@ -123,8 +123,12 @@ sequenceDiagram
     Note over PR: 记录 messageID-role
     OC->>PR: message.part.updated
     Note over PR: 提取 text sessionID
-    PR->>PR: 生成文件名
-    PR->>FS: mkdir + appendFile
+    PR->>PR: 按 session 缓存/查找文件路径
+    alt 首条消息
+        PR->>FS: mkdir + writeFile（含 SessionID）
+    else 后续消息
+        PR->>FS: appendFile（追加内容）
+    end
     FS-->>PR: 写入完成
       </pre>
       <div class="caption">图 1：用户提示词录制时序</div>
@@ -135,12 +139,13 @@ sequenceDiagram
       <li><strong>仅录制用户消息</strong>：通过 <code>role === "user"</code> 过滤，忽略 AI 回复和系统消息</li>
       <li><strong>快速失败</strong>：缺少 sessionID 或 text 为空时直接返回，不执行文件操作</li>
       <li><strong>延迟写入</strong>：先做所有检查和查找，最后一次性写入，减少文件操作次数</li>
+      <li><strong>会话缓存</strong>：sessionFileCache 缓存 session→filepath 映射，后续消息直接追加，避免重复目录计算和 IO</li>
     </ul>
   </section>
 
   <section id="core-modules">
     <h2>三、核心模块详解</h2>
-    <p>整个插件的源代码位于单个文件 <code>index.ts</code>（207 行），由 6 个函数/模块组成。</p>
+    <p>整个插件的源代码位于单个文件 <code>index.ts</code>（226 行），由多个函数/模块组成。</p>
 
     <h3 id="event-role">3.1 事件监听与角色解析</h3>
     <p>由于 <code>message.part.updated</code> 事件的 payload 结构在不同版本的 OpenCode 中可能变化，<code>role</code> 字段可能在多个位置出现。插件使用<strong>四级回退</strong>策略逐级尝试：</p>
@@ -153,20 +158,23 @@ if (!role) role = info?.message?.role</pre>
     <h3 id="file-storage">3.2 文件存储与目录组织</h3>
     <p>所有录制的提示词存储在项目根目录的 <code>.agent/prompts/</code> 下，按日期分层组织：</p>
     <pre>.agent/prompts/
- 2026/
-  06/
-   04/
-     2606040943-What is AI.md
-     2606041005-How to code.md</pre>
+  2026/
+   06/
+    05/
+      2606050943-What is AI.md</pre>
     <p>文件名格式：<code>yyMMddHHmm-{topic}.md</code></p>
     <table>
       <tr><th>片段</th><th>来源</th><th>说明</th></tr>
-      <tr><td><code>yyMMddHHmm</code></td><td><code>formatDate()</code></td><td>当前日期和时间，确保文件名按时间排序</td></tr>
-      <tr><td><code>topic</code></td><td><code>sanitizeFilename(text)</code></td><td>提示词前 40 字符（净化后）</td></tr>
+      <tr><td><code>yyMMddHHmm</code></td><td><code>formatDate()</code></td><td>首次消息的日期和时间，确保文件名按时间排序</td></tr>
+      <tr><td><code>topic</code></td><td><code>sanitizeFilename(text)</code></td><td>首条提示词前 40 字符（净化后）</td></tr>
     </table>
 
+    <p><strong>会话合并机制：</strong>同一 session 的多条消息合并到同一个文件，以首条消息的主题命名。后续消息通过 <code>sessionFileCache</code>（<code>Map&lt;sessionID, filepath&gt;</code>）缓存文件路径直接追加，避免重复 IO。</p>
+
     <p>文件内容格式：</p>
-    <pre>============ HH:mm ============
+    <pre>============ SessionID: ses_xxxxx ============
+
+============ HH:mm ============
 
 {提示词正文 1}
 
@@ -267,7 +275,7 @@ bun add -g opencode-prompt-recorder</pre>
     <ul>
       <li>每次用户发送提示词，插件被动接收事件，无需任何手动操作</li>
       <li>提示词文件写入项目根目录的 <code>.agent/prompts/</code></li>
-      <li>每个用户提示词写入独立的文件，以时间戳开头</li>
+      <li>同一 session 的提示词合并到同一个文件，以首条消息主题命名</li>
       <li>AI 回复不会被记录（仅录制 role 为 user 的消息）</li>
     </ul>
 

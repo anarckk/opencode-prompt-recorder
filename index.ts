@@ -1,7 +1,8 @@
 import { mkdir, appendFile, writeFile, readFile } from "fs/promises"
 import { join, dirname } from "path"
 import { fileURLToPath } from "url"
-import type { Plugin } from "@opencode-ai/plugin"
+import type { Plugin, PluginInput } from "@opencode-ai/plugin"
+import { startAutoUpdate } from "./updateOps"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -73,23 +74,27 @@ function formatTime(date: Date): string {
  * 功能：
  * - 监听 message.updated 事件，获取用户发送的提示词
  * - 将提示词按日期保存到 .agent/prompts/yyyy/MM/dd/ 目录
+ * - 同一 session 的消息合并到同一个文件，文件以首条消息主题命名
  * - 文件名格式：yyMMddHHmm-{提示词主题}.md
  * - 文件内容格式：
+ *   ============ SessionID: {sessionID} ============
  *   ============ {HH:mm} ============
  *   {用户提示词1}
  *
  *   ============ {HH:mm} ============
  *   {用户提示词2}
  * 
- * @param directory - 当前工作目录，用于构建保存路径
- * @param client - OpenCode SDK 客户端（当前未使用，保留以备将来扩展）
+ * @param ctx - 插件上下文（包含 directory 和 client）
  * @returns 插件钩子对象
  */
-export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
+export const OpenCodePromptRecorder: Plugin = async (ctx) => {
+  startAutoUpdate(ctx, true)
+  const { directory, client } = ctx
   let versionFileWritten = false
   const messageRoleMap = new Map<string, string>()
   const processedMessageKeys = new Set<string>()
   let mainSessionId: string | null = null
+  const sessionFileCache = new Map<string, string>()
 
   return {
     "event": async ({ event }) => {
@@ -165,12 +170,19 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
             const yy = yyyy.slice(-2)
 
             const timeTitle = `============ ${time} ============`
-            const fileContent = `${timeTitle}\n\n${text}`
 
-            const topic = sanitizeFilename(text)
-            const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}.md`
-            const filepath = join(promptDir, filename)
-            await appendFile(filepath, fileContent)
+            // 同一 session 的消息合并到同一个文件
+            let filepath = sessionFileCache.get(sessionID)
+            if (filepath) {
+              await appendFile(filepath, `\n\n${timeTitle}\n\n${text}`)
+            } else {
+              const topic = sanitizeFilename(text)
+              const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}.md`
+              filepath = join(promptDir, filename)
+              const sessionHeader = `============ SessionID: ${sessionID} ============`
+              await writeFile(filepath, `${sessionHeader}\n\n${timeTitle}\n\n${text}`)
+              sessionFileCache.set(sessionID, filepath)
+            }
           }
         }
       }
