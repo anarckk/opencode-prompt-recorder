@@ -16,10 +16,6 @@ type UpdateResult =
   | { updated: false; error: "remove_failed"; name: string; current: string; latest: string }
   | { updated: false }
 
-function log(msg: string) {
-  console.error(`[prompt-recorder][autoUpdate] ${msg}`)
-}
-
 let autoUpdateChecked = false
 
 export function startAutoUpdate(ctx: PluginInput, enabled: boolean): void {
@@ -33,7 +29,6 @@ export function startAutoUpdate(ctx: PluginInput, enabled: boolean): void {
   void checkAutoUpdate(controller.signal)
     .then((result) => {
       if (!result.updated) return
-      log(`发现新版本: ${result.current} → ${result.latest}`)
       setTimeout(() => {
         ctx.client.tui.showToast({
           body: {
