@@ -62,15 +62,57 @@
     <p><strong>opencode-prompt-recorder</strong> 是一个为 OpenCode AI 编程助手设计的插件，核心功能是<strong>自动捕获并持久化用户在聊天对话中发送的提示词</strong>到本地文件系统。它作为审计日志、训练数据收集和会话历史工具，无需用户任何手动操作即可后台静默运行。</p>
 
     <div class="info-box">
-      <strong>💡 项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp; 版本：<code>1.7.5</code> &nbsp;|&nbsp; 作者：<code>anarckk</code> &nbsp;|&nbsp; 许可：MIT
+      <strong>💡 项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp; 版本：<code>1.7.6</code> &nbsp;|&nbsp; 作者：<code>anarckk</code> &nbsp;|&nbsp; 许可：MIT
     </div>
 
-    <h3>核心价值</h3>
+    <h3>功能特性</h3>
+
+    <h4>📥 自动捕获</h4>
+    <ul>
+      <li><strong>被动监听</strong>：订阅 OpenCode 的 <code>message.part.updated</code> 事件，用户发送提示词后自动保存，无需手动操作</li>
+      <li><strong>角色过滤</strong>：仅记录 <code>role === "user"</code> 的消息，忽略 AI 回复和系统消息。通过四级 fallback（messageRoleMap → part.message.role → info.role → info.message.role）适应 OpenCode 版本差异</li>
+      <li><strong>多级内容过滤</strong>：跳过 <code>synthetic</code> 部件（其他插件注入的系统提示）、<code>ignored</code> 部件（仅用户可见的通知）、<code>&lt;system-reminder&gt;</code>/<code>&lt;system&gt;</code> 标签包裹的系统注入内容</li>
+      <li><strong>消息去重</strong>：以 <code>messageID + text</code> 组合键去重，防御并发事件和消息内容不变的极端情况</li>
+    </ul>
+
+    <h4>📁 文件存储</h4>
+    <ul>
+      <li><strong>时间目录</strong>：按 <code>.agent/prompts/yyyy/MM/dd/</code> 分层存储，日期一目了然</li>
+      <li><strong>会话合并</strong>：同一会话的多条消息合并到同一个文件，避免碎片化。首条消息创建文件，后续消息追加写入</li>
+      <li><strong>Task 子会话分离</strong>：task 工具创建的子 agent 会话的提示词自动存入 <code>.agent/prompts/task/yyyy/MM/dd/</code> 目录，与主会话隔离</li>
+      <li><strong>文件名格式</strong>：<code>yyMMddHHmm-{主题}.txt</code>，主题优先取自会话标题；标题不存在时回退到首条消息文本</li>
+      <li><strong>文件名净化</strong>：移除 <code>&lt;&gt;:"/\|?*</code> 及控制字符、HTML 标签，截断至 40 字符，空白时回退为 <code>untitled</code></li>
+      <li><strong>缓存写入</strong>：<code>sessionFileCache</code> 缓存文件路径，避免重复目录计算和 IO 开销</li>
+      <li><strong>跨天支持</strong>：每条消息的时间戳包含日期（<code>yyyy-MM-dd HH:mm</code>），目录按首条消息日期决定</li>
+    </ul>
+
+    <h4>🏷️ 会话标题</h4>
+    <ul>
+      <li><strong>实时捕获</strong>：监听 <code>session.created</code> 和 <code>session.updated</code> 事件，将 <code>event.properties.info.title</code> 存入 <code>sessionTitleMap</code></li>
+      <li><strong>文件名优先</strong>：创建文件时优先用会话标题作文件名；标题不存在时回退到首条消息文本</li>
+    </ul>
+
+    <h4>🔄 自动更新</h4>
+    <ul>
+      <li><strong>版本检查</strong>：插件启动时异步查询 npm registry，获取最新版本号</li>
+      <li><strong>自动升级</strong>：发现新版本后删除旧版本目录，依赖 npm 重启时重新安装</li>
+      <li><strong>模块级互斥</strong>：通过 <code>autoUpdateChecked</code> 标志防止多插件实例重复检查</li>
+      <li><strong>用户通知</strong>：更新后 5 秒通过 TUI Toast 提示用户重启</li>
+    </ul>
+
+    <h4>🛡️ 可靠性</h4>
+    <ul>
+      <li><strong>错误静默</strong>：所有异常被捕获并静默处理，不干扰 OpenCode 正常运行</li>
+      <li><strong>版本化 Readme</strong>：首次 <code>session.updated</code> 事件时自动写入 <code>.agent/opencode-prompt-recorder-readme.txt</code>，记录版本和项目信息</li>
+      <li><strong>调试日志</strong>：设置 <code>PROMPT_RECORDER_DEBUG=1</code> 环境变量后，详细日志写入 <code>.agent/prompts-log/log.txt</code></li>
+    </ul>
+
+    <h4>⚡ 使用场景</h4>
     <ul>
       <li><strong>审计追踪</strong>：完整记录每一次与 AI 的交互过程，便于事后回溯</li>
       <li><strong>训练数据收集</strong>：积累真实用户提示词，可用于模型微调或 prompt 工程优化</li>
-      <li><strong>会话恢复</strong>：对话按时间组织，便于回溯</li>
-      <li><strong>零配置</strong>：安装即用，无需额外设置</li>
+      <li><strong>会话历史</strong>：对话按时间组织，便于回溯</li>
+      <li><strong>质量监控</strong>：记录用户提问模式，分析使用趋势</li>
     </ul>
 
     <h3>技术概要</h3>
@@ -79,7 +121,7 @@
       <tr><td>编程语言</td><td>TypeScript (ES2022)</td></tr>
       <tr><td>运行时</td><td>Node.js / Bun</td></tr>
       <tr><td>依赖</td><td>仅 peer dependency：<code>@opencode-ai/plugin &gt;=0.15.0</code></td></tr>
-      <tr><td>代码规模</td><td>单文件 ~220 行，零外部运行时依赖</td></tr>
+      <tr><td>代码规模</td><td>单文件 ~246 行，零外部运行时依赖</td></tr>
       <tr><td>构建工具</td><td>esbuild</td></tr>
       <tr><td>包管理</td><td>npm 发布，ESM 模块</td></tr>
     </table>
@@ -115,7 +157,7 @@
       <tr><th>ID</th><th>需求</th><th>说明</th></tr>
       <tr><td>F1</td><td>自动捕获</td><td>用户发送提示词后自动保存，无需手动操作</td></tr>
       <tr><td>F2</td><td>按时间组织</td><td>文件按 yyyy/MM/dd 目录分层，文件名包含时间戳</td></tr>
-      <tr><td>F3</td><td>会话聚合</td><td>同一会话的多条消息合并到同一文件，以首条主题命名</td></tr>
+      <tr><td>F3</td><td>会话聚合</td><td>同一会话的多条消息合并到同一文件，以会话标题命名；标题不存在时回退到首条消息文本</td></tr>
       <tr><td>F4</td><td>角色过滤</td><td>仅记录用户消息，忽略 AI 回复和系统消息</td></tr>
       <tr><td>F5</td><td>去重</td><td>同一消息不被重复保存</td></tr>
       <tr><td>F6</td><td>文件名净化</td><td>特殊字符自动清理，防止文件系统错误</td></tr>
@@ -195,7 +237,7 @@
     <table>
       <tr><th>方案</th><th>拒绝原因</th></tr>
       <tr><td>SQLite 存储</td><td>引入原生依赖，破坏零依赖原则；增加构建复杂度</td></tr>
-      <tr><td>JSON / YAML 格式</td><td>不如 Markdown 直接可读，需要额外工具查看</td></tr>
+      <tr><td>JSON / YAML 格式</td><td>不如纯文本直接可读，需要额外工具查看</td></tr>
       <tr><td>轮询式数据采集</td><td>违背 OpenCode 插件的设计规范（应被动监听）</td></tr>
       <tr><td>网络上报（中心化收集）</td><td>数据安全不可接受；用户期望数据存本地</td></tr>
       <tr><td>通过 chat.message 钩子拦截</td><td>会修改消息流，违背零侵入原则。改用 message.part.updated 只读监听</td></tr>
@@ -219,7 +261,7 @@
       <tr><th>场景</th><th>处理方式</th></tr>
       <tr><td>空文本提示词</td><td>跳过，不写入</td></tr>
       <tr><td>纯空白 / 特殊字符文件名</td><td>回退为 "untitled"</td></tr>
-      <tr><td>超长提示词（&gt;40 字符）</td><td>截断至 40 字符作为文件名</td></tr>
+      <tr><td>超长标题 / 提示词（&gt;40 字符）</td><td>截断至 40 字符作为文件名；标题为空时回退到首条消息文本</td></tr>
       <tr><td>系统注入标签（海马体等）</td><td>isSystemInjected() 检测并跳过</td></tr>
       <tr><td>并发消息事件</td><td>通过 processedMessageKeys 去重</td></tr>
       <tr><td>跨天会话</td><td>时间戳含日期（yyyy-MM-dd HH:mm），按首次消息日期分目录</td></tr>
@@ -240,7 +282,8 @@
       <tr><th>事件类型</th><th>触发时机</th><th>处理动作</th></tr>
       <tr><td><code>message.updated</code></td><td>消息元数据更新时</td><td>提取 <code>messageID to role</code> 映射存入 Map，供后续事件使用</td></tr>
       <tr><td><code>message.part.updated</code></td><td>消息内容部分更新时</td><td>核心逻辑：检测 task、检查 role、去重、按 session 缓存写入或追加</td></tr>
-      <tr><td><code>session.updated</code></td><td>会话更新时</td><td>写入版本化的 readme 文件（仅首次触发）</td></tr>
+      <tr><td><code>session.created</code></td><td>会话创建时</td><td>捕获会话标题存入 sessionTitleMap，供文件命名使用</td></tr>
+      <tr><td><code>session.updated</code></td><td>会话更新时</td><td>捕获标题变更 + 写入版本化的 readme 文件（仅首次触发）</td></tr>
     </table>
 
     <div class="mermaid-container">
@@ -264,8 +307,11 @@ sequenceDiagram
     OC->>PR: message.part.updated (type=tool, tool=task)
     Note over PR: track child sessionId
 
+    OC->>PR: session.created
+    Note over PR: capture session title
+
     OC->>PR: session.updated
-    Note over PR: write version readme (once)
+    Note over PR: capture title change + write readme
       </pre>
       <div class="caption">图 1：插件事件处理全景</div>
     </div>
@@ -300,6 +346,7 @@ flowchart TD
       <li><strong>快速失败</strong>：前置条件不满足时立即返回，不执行文件操作</li>
       <li><strong>延迟写入</strong>：先做所有检查和查找，最后一次性写入</li>
       <li><strong>会话缓存</strong>：sessionFileCache 避免重复目录计算和 IO</li>
+      <li><strong>会话标题文件名</strong>：通过 <code>session.created</code>/<code>session.updated</code> 事件捕获标题存入 <code>sessionTitleMap</code>，文件创建时优先用标题；标题不存在时回退到首条消息文本</li>
     </ul>
   </section>
 

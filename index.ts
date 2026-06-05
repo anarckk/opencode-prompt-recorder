@@ -65,8 +65,8 @@ function formatDate(date: Date): { yyyy: string; MM: string; dd: string; HH: str
  * 功能：
  * - 监听 message.updated 事件，获取用户发送的提示词
  * - 将提示词按日期保存到 .agent/prompts/yyyy/MM/dd/ 目录
- * - 同一 session 的消息合并到同一个文件，文件以首条消息主题命名
- * - 文件名格式：yyMMddHHmm-{topic}.md
+ * - 同一 session 的消息合并到同一个文件，文件以会话标题命名，标题不存在时回退到首条消息主题
+ * - 文件名格式：yyMMddHHmm-{topic}.txt
  * - 文件内容格式：
  *   ============ SessionID: {sessionID} ============
  *   ============ {yyyy-MM-dd HH:mm} ============
@@ -82,6 +82,7 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
   startAutoUpdate(ctx, true)
   const { directory } = ctx
   let versionFileWritten = false
+  const sessionTitleMap = new Map<string, string>()
   const messageRoleMap = new Map<string, string>()
   const processedMessageKeys = new Set<string>()
   const taskSessionIds = new Set<string>()
@@ -181,8 +182,8 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
               cached.time = Date.now()
               await appendFile(cached.filepath, `\n\n${timeTitle}\n\n${text}`)
             } else {
-              const topic = sanitizeFilename(text)
-              const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}.md`
+              const topic = sanitizeFilename(sessionTitleMap.get(sessionID) ?? text)
+              const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}.txt`
               const filepath = join(promptDir, filename)
               const sessionHeader = `============ SessionID: ${sessionID} ============`
               await writeFile(filepath, `${sessionHeader}\n\n${timeTitle}\n\n${text}`)
@@ -193,13 +194,26 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
         }
       }
 
-      // session.updated 事件 - 只写 readme 文件
-      if (event.type === "session.updated" && !versionFileWritten) {
-        try {
-          const version = await getVersion()
-          const readmeDir = join(directory, ".agent")
-          const readmeFile = join(readmeDir, "opencode-prompt-recorder-readme.txt")
-          const content = `# OpenCode Prompt Recorder
+      // session.created - 捕获会话标题
+      if (event.type === "session.created") {
+        const info = (event.properties as any).info
+        if (info?.id && info?.title) {
+          sessionTitleMap.set(info.id, info.title)
+        }
+      }
+
+      // session.updated - 捕获标题变更 + 写 readme 文件
+      if (event.type === "session.updated") {
+        const info = (event.properties as any).info
+        if (info?.id && info?.title) {
+          sessionTitleMap.set(info.id, info.title)
+        }
+        if (!versionFileWritten) {
+          try {
+            const version = await getVersion()
+            const readmeDir = join(directory, ".agent")
+            const readmeFile = join(readmeDir, "opencode-prompt-recorder-readme.txt")
+            const content = `# OpenCode Prompt Recorder
 
 自动记录用户提示词到 .agent/prompts 目录的插件。
 
@@ -207,21 +221,22 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
 作者：anarckk  
 项目地址：https://github.com/anarckk/opencode-prompt-recorder`
 
-          try {
-            const existing = await readFile(readmeFile, "utf-8")
-            if (existing === content) {
-              versionFileWritten = true
-              return
+            try {
+              const existing = await readFile(readmeFile, "utf-8")
+              if (existing === content) {
+                versionFileWritten = true
+                return
+              }
+            } catch {
+              // 文件不存在，继续写入
             }
-          } catch {
-            // 文件不存在，继续写入
-          }
 
-          await mkdir(readmeDir, { recursive: true })
-          await writeFile(readmeFile, content)
-          versionFileWritten = true
-        } catch (e) {
-          // 忽略readme文件写入错误
+            await mkdir(readmeDir, { recursive: true })
+            await writeFile(readmeFile, content)
+            versionFileWritten = true
+          } catch (e) {
+            // 忽略readme文件写入错误
+          }
         }
       }
     }

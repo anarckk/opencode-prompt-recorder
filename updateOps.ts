@@ -20,8 +20,12 @@ function log(msg: string) {
   console.error(`[prompt-recorder][autoUpdate] ${msg}`)
 }
 
+let autoUpdateChecked = false
+
 export function startAutoUpdate(ctx: PluginInput, enabled: boolean): void {
   if (!enabled) return
+  if (autoUpdateChecked) return
+  autoUpdateChecked = true
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10_000)
