@@ -217,7 +217,7 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
 
               setTimeout(async () => {
                 try {
-                  const res = await ctx.client.session.get({ sessionID }) as any
+                  const res = await ctx.client.session.get({ path: { id: sessionID } })
                   const fetchedTitle = res?.data?.title
                   if (!fetchedTitle) return
                   const oldTitle = sessionTitleMap.get(sessionID)
