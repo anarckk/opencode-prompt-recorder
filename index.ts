@@ -61,7 +61,7 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
   const sessionTitleMap = new Map<string, string>()
   const messageRoleMap = new Map<string, { role: string; time: number }>()
   const processedMessageKeys = new Map<string, number>()
-  const taskSessionIds = new Set<string>()
+  const taskSessionIds = new Map<string, number>()
   const CACHE_MAX_IDLE_MS = 24 * 60 * 60 * 1000
   const CACHE_MAX_SIZE = 200
   const MAX_MAP_SIZE = 2000
@@ -89,6 +89,11 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
         if (now - v.time > MAX_MAP_AGE) messageRoleMap.delete(k)
       }
     }
+    if (taskSessionIds.size > MAX_MAP_SIZE) {
+      for (const [k, t] of taskSessionIds) {
+        if (now - t > MAX_MAP_AGE) taskSessionIds.delete(k)
+      }
+    }
   }
 
   async function renameFileWithTitle(cached: { filepath: string; time: number }, title: string) {
@@ -101,8 +106,8 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
     try {
       await rename(cached.filepath, newFilepath)
       cached.filepath = newFilepath
-    } catch {
-      // ignore
+    } catch (e) {
+      console.error(`[prompt-recorder] rename failed: ${cached.filepath}`, e)
     }
   }
 
@@ -122,7 +127,7 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
       if (stateMetadata) {
         const childId: string | undefined = stateMetadata.sessionId ?? stateMetadata.sessionID
         if (childId) {
-          taskSessionIds.add(childId)
+          taskSessionIds.set(childId, Date.now())
           await debugLog(directory, `[prompt-recorder] tracked task session: ${childId}`)
         }
       }
