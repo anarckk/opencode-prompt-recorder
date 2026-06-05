@@ -1,4 +1,4 @@
-import { mkdir, appendFile, writeFile, readFile, rename } from "fs/promises"
+import { mkdir, appendFile, writeFile, readFile, rename, readdir } from "fs/promises"
 import { join, dirname, basename } from "path"
 import { fileURLToPath } from "url"
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
@@ -55,6 +55,33 @@ function formatDate(date: Date) {
   return { yyyy, MM, dd, HH, mm, ss }
 }
 
+const FILE_EXT = ".txt"
+
+async function findSessionFile(directory: string, sessionID: string): Promise<string | undefined> {
+  return scanDirForSession(join(directory, ".agent", "prompts"), sessionID)
+}
+
+async function scanDirForSession(dir: string, sessionID: string): Promise<string | undefined> {
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch {
+    return undefined
+  }
+  for (const name of names) {
+    const fullPath = join(dir, name)
+    try {
+      const content = await readFile(fullPath, "utf-8")
+      if (content.includes(`SessionID: ${sessionID}`)) return fullPath
+    } catch {
+      if (name.endsWith(FILE_EXT)) continue
+      const found = await scanDirForSession(fullPath, sessionID)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
 const OpenCodePromptRecorder: Plugin = async (ctx) => {
   startAutoUpdate(ctx, true)
   const { directory } = ctx
@@ -70,7 +97,6 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
   const PENDING_RENAME_MAX_AGE = 60 * 60 * 1000
   const sessionFileCache = new Map<string, { filepath: string; time: number }>()
   const pendingRenames = new Map<string, { title: string; time: number }>()
-  const FILE_EXT = ".txt"
   const pendingSdkTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   function pruneCache() {
@@ -199,20 +225,26 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
       cached.time = Date.now()
       await appendFile(cached.filepath, `\n\n${timeTitle}\n\n${text}`)
     } else {
-      const topic = sanitizeFilename(sessionTitleMap.get(sessionID)?.title ?? text)
-      const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}${FILE_EXT}`
-      const filepath = join(promptDir, filename)
-      const sessionHeader = `============ SessionID: ${sessionID} ============`
-      await writeFile(filepath, `${sessionHeader}\n\n${timeTitle}\n\n${text}`)
-      sessionFileCache.set(sessionID, { filepath, time: Date.now() })
-      pruneCache()
+      const foundPath = await findSessionFile(directory, sessionID)
+      if (foundPath) {
+        sessionFileCache.set(sessionID, { filepath: foundPath, time: Date.now() })
+        await appendFile(foundPath, `\n\n${timeTitle}\n\n${text}`)
+      } else {
+        const topic = sanitizeFilename(sessionTitleMap.get(sessionID)?.title ?? text)
+        const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}${FILE_EXT}`
+        const filepath = join(promptDir, filename)
+        const sessionHeader = `============ SessionID: ${sessionID} ============`
+        await writeFile(filepath, `${sessionHeader}\n\n${timeTitle}\n\n${text}`)
+        sessionFileCache.set(sessionID, { filepath, time: Date.now() })
+        pruneCache()
 
-      const pendingRename = pendingRenames.get(sessionID)
-      if (pendingRename) {
-        pendingRenames.delete(sessionID)
-        const newEntry = sessionFileCache.get(sessionID)
-        if (newEntry) {
-          await renameFileWithTitle(newEntry, pendingRename.title)
+        const pendingRename = pendingRenames.get(sessionID)
+        if (pendingRename) {
+          pendingRenames.delete(sessionID)
+          const newEntry = sessionFileCache.get(sessionID)
+          if (newEntry) {
+            await renameFileWithTitle(newEntry, pendingRename.title)
+          }
         }
       }
 
