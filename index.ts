@@ -40,7 +40,8 @@ function sanitizeFilename(str: string): string {
 }
 
 function isSystemInjected(text: string): boolean {
-  return /^\s*<(system-reminder|system)>/.test(text)
+  const trimmed = text.trimStart()
+  return trimmed.startsWith('<system-reminder>') || trimmed.startsWith('<system>')
 }
 
 /**
@@ -105,6 +106,11 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
       if (event.type === "message.part.updated") {
         const part = (event.properties as any).part
         if (part?.type === "text" && part?.text) {
+          // 跳过 synthetic 部件（海马体等插件注入的系统提示）
+          if (part.synthetic) {
+            return
+          }
+
           const sessionID = part.sessionID
           const messageID = part.messageID
           const text = part.text
