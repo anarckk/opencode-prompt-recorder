@@ -1,5 +1,5 @@
-import { mkdir, appendFile, writeFile, readFile } from "fs/promises"
-import { join, dirname } from "path"
+import { mkdir, appendFile, writeFile, readFile, rename } from "fs/promises"
+import { join, dirname, basename } from "path"
 import { fileURLToPath } from "url"
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import { startAutoUpdate } from "./updateOps"
@@ -94,6 +94,21 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
     const now = Date.now()
     for (const [k, v] of sessionFileCache) {
       if (now - v.time > CACHE_MAX_IDLE_MS) sessionFileCache.delete(k)
+    }
+  }
+
+  async function renameFileWithTitle(cached: { filepath: string; time: number }, title: string) {
+    const dir = dirname(cached.filepath)
+    const base = basename(cached.filepath)
+    const prefix = base.match(/^(\d{10})-/)
+    if (!prefix) return
+    const newFilepath = join(dir, `${prefix[1]}-${sanitizeFilename(title)}.txt`)
+    if (newFilepath === cached.filepath) return
+    try {
+      await rename(cached.filepath, newFilepath)
+      cached.filepath = newFilepath
+    } catch {
+      // ignore
     }
   }
 
@@ -199,6 +214,10 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
         const info = (event.properties as any).info
         if (info?.id && info?.title) {
           sessionTitleMap.set(info.id, info.title)
+          const cached = sessionFileCache.get(info.id)
+          if (cached) {
+            await renameFileWithTitle(cached, info.title)
+          }
         }
       }
 
@@ -206,7 +225,14 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
       if (event.type === "session.updated") {
         const info = (event.properties as any).info
         if (info?.id && info?.title) {
+          const oldTitle = sessionTitleMap.get(info.id)
           sessionTitleMap.set(info.id, info.title)
+          if (oldTitle !== info.title) {
+            const cached = sessionFileCache.get(info.id)
+            if (cached) {
+              await renameFileWithTitle(cached, info.title)
+            }
+          }
         }
         if (!versionFileWritten) {
           try {
