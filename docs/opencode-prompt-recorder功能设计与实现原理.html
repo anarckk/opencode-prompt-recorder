@@ -44,11 +44,10 @@
     <li><a href="#core-modules" class="l2">三、核心模块详解</a></li>
     <li><a href="#event-role" class="l3">3.1 事件监听与角色解析</a></li>
     <li><a href="#file-storage" class="l3">3.2 文件存储与目录组织</a></li>
-    <li><a href="#cross-day" class="l3">3.3 跨天会话合并</a></li>
-    <li><a href="#dedupe" class="l3">3.4 去重机制</a></li>
-    <li><a href="#sanitize" class="l3">3.5 文件名安全处理</a></li>
-    <li><a href="#debug-log" class="l3">3.6 调试日志</a></li>
-    <li><a href="#readme-version" class="l3">3.7 版本信息与 Readme</a></li>
+    <li><a href="#dedupe" class="l3">3.3 去重机制</a></li>
+    <li><a href="#sanitize" class="l3">3.4 文件名安全处理</a></li>
+    <li><a href="#debug-log" class="l3">3.5 调试日志</a></li>
+    <li><a href="#readme-version" class="l3">3.6 版本信息与 Readme</a></li>
     <li><a href="#testing" class="l2">四、测试</a></li>
     <li><a href="#test-cases" class="l3">4.1 测试用例</a></li>
     <li><a href="#usage" class="l2">五、配置与使用</a></li>
@@ -72,7 +71,7 @@
     <ul>
       <li><strong>审计追踪</strong>：完整记录每一次与 AI 的交互过程，便于事后回溯</li>
       <li><strong>训练数据收集</strong>：积累真实用户提示词，可用于模型微调或 prompt 工程优化</li>
-      <li><strong>会话恢复</strong>：跨天的对话自动合并到同一文件，不会因日期切换而断裂</li>
+      <li><strong>会话恢复</strong>：对话按时间组织，便于回溯</li>
       <li><strong>零配置</strong>：安装即用，无需额外设置</li>
     </ul>
 
@@ -82,7 +81,7 @@
       <tr><td>编程语言</td><td>TypeScript (ES2022)</td></tr>
       <tr><td>运行时</td><td>Node.js / Bun</td></tr>
       <tr><td>依赖</td><td>仅 peer dependency：<code>@opencode-ai/plugin &gt;=0.15.0</code></td></tr>
-      <tr><td>代码规模</td><td>单文件 226 行，零外部运行时依赖</td></tr>
+      <tr><td>代码规模</td><td>单文件 207 行，零外部运行时依赖</td></tr>
       <tr><td>构建工具</td><td>Bun / esbuild</td></tr>
       <tr><td>包管理</td><td>npm 发布，ESM 模块</td></tr>
     </table>
@@ -124,13 +123,8 @@ sequenceDiagram
     Note over PR: 记录 messageID-role
     OC->>PR: message.part.updated
     Note over PR: 提取 text sessionID
-    PR->>PR: findExistingFile
-    Note over PR: 遍历所有日期目录
-    alt 找到已有文件
-        PR->>FS: appendFile
-    else 未找到
-        PR->>FS: mkdir + appendFile
-    end
+    PR->>PR: 生成文件名
+    PR->>FS: mkdir + appendFile
     FS-->>PR: 写入完成
       </pre>
       <div class="caption">图 1：用户提示词录制时序</div>
@@ -146,7 +140,7 @@ sequenceDiagram
 
   <section id="core-modules">
     <h2>三、核心模块详解</h2>
-    <p>整个插件的源代码位于单个文件 <code>index.ts</code>（226 行），由 7 个函数/模块组成。</p>
+    <p>整个插件的源代码位于单个文件 <code>index.ts</code>（207 行），由 6 个函数/模块组成。</p>
 
     <h3 id="event-role">3.1 事件监听与角色解析</h3>
     <p>由于 <code>message.part.updated</code> 事件的 payload 结构在不同版本的 OpenCode 中可能变化，<code>role</code> 字段可能在多个位置出现。插件使用<strong>四级回退</strong>策略逐级尝试：</p>
@@ -162,15 +156,13 @@ if (!role) role = info?.message?.role</pre>
  2026/
   06/
    04/
-    20260604-0943-ses_abc-What is AI.md
-    20260604-1005-ses_def-How to code.md</pre>
-    <p>文件名格式：<code>yyyyMMdd-HHmm-{sessionId}-{topic}.md</code></p>
+     2606040943-What is AI.md
+     2606041005-How to code.md</pre>
+    <p>文件名格式：<code>yyMMddHHmm-{topic}.md</code></p>
     <table>
       <tr><th>片段</th><th>来源</th><th>说明</th></tr>
-      <tr><td><code>yyyyMMdd</code></td><td><code>formatDate()</code></td><td>当前日期，确保文件名按时间排序</td></tr>
-      <tr><td><code>HHmm</code></td><td><code>formatDate()</code></td><td>首次创建的时间</td></tr>
-      <tr><td><code>sessionId</code></td><td>事件 payload</td><td>OpenCode 分配的唯一会话标识</td></tr>
-      <tr><td><code>topic</code></td><td><code>sanitizeFilename(text)</code></td><td>提示词前 50 字符（净化后）</td></tr>
+      <tr><td><code>yyMMddHHmm</code></td><td><code>formatDate()</code></td><td>当前日期和时间，确保文件名按时间排序</td></tr>
+      <tr><td><code>topic</code></td><td><code>sanitizeFilename(text)</code></td><td>提示词前 40 字符（净化后）</td></tr>
     </table>
 
     <p>文件内容格式：</p>
@@ -182,43 +174,7 @@ if (!role) role = info?.message?.role</pre>
 
 {提示词正文 2}</pre>
 
-    <h3 id="cross-day">3.3 跨天会话合并</h3>
-    <p>这是插件最核心的功能特性。当用户在跨天（例如 23:50 到 00:10）继续同一会话时，提示词不应因日期切换而分裂到不同文件。解决方案是 <code>findExistingFile()</code> 函数：</p>
-    <pre>async function findExistingFile(directory, sessionId) {
-  const base = join(directory, ".agent", "prompts")
-  for (const year of await readdir(base)) {
-    for (const month of await readdir(yearPath)) {
-      for (const day of await readdir(monthPath)) {
-        for (const file of await readdir(dayPath)) {
-          if (file.includes("-${sessionId}-")) {
-            return join(dayPath, file)
-          }
-        }
-      }
-    }
-  }
-  return null
-}</pre>
-
-    <div class="mermaid-container">
-      <pre class="mermaid">
-flowchart TD
-    Start[收到新用户消息] --> Dir[创建当日目录]
-    Dir --> Search[遍历所有日期目录]
-    Search --> Found{找到含 sessionId 的文件?}
-    Found -->|Yes| Append[追加到该文件]
-    Found -->|No| Create[创建新文件]
-    Append --> Done[完成]
-    Create --> Done
-      </pre>
-      <div class="caption">图 2：跨天会话合并流程</div>
-    </div>
-
-    <div class="info-box warn">
-      <strong>⚠️ 设计权衡：</strong> 每次写入前都触发一次四层递归遍历，随着时间积累目录增多，性能会线性下降。但对于个人使用的 prompt 录制场景（每天几十个文件），此开销可忽略不计。如果未来需要扩展，可考虑引入索引缓存。
-    </div>
-
-    <h3 id="dedupe">3.4 去重机制</h3>
+    <h3 id="dedupe">3.3 去重机制</h3>
     <p>由于 <code>message.part.updated</code> 事件在流式传输中可能多次触发，插件使用 Set 存储已处理的 <code>messageID:text</code> 组合键：</p>
     <pre>const dedupeKey = "${messageID}:${text}"
 if (processedMessageKeys.has(dedupeKey)) return
@@ -233,29 +189,36 @@ flowchart TD
     Dup -->|No| Add[加入 Set]
     Add --> Write[继续写入文件]
       </pre>
-      <div class="caption">图 3：去重判断流程</div>
+      <div class="caption">图 2：去重判断流程</div>
     </div>
 
     <p>这种方案在插件运行期间有效。如果 OpenCode 运行时重启，Set 会被清空，但文件系统是持久化的，追加写入不会产生重复。</p>
 
-    <h3 id="sanitize">3.5 文件名安全处理</h3>
+    <h3 id="sanitize">3.4 文件名安全处理</h3>
     <p><code>sanitizeFilename()</code> 函数将用户提示词转换为安全的文件名片段：</p>
     <pre>function sanitizeFilename(str) {
-  return str.replace(/[&lt;&gt;:"/\\|?*\x00-\x1f]/g, '').substring(0, 50).trim()
+  const firstLine = str.split('\n')[0].trim()
+  const cleaned = firstLine.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+  const result = cleaned.replace(ILLEGAL_FILENAME_CHARS, '').substring(0, 40).trim()
+  return result || 'untitled'
 }</pre>
     <table>
       <tr><th>处理步骤</th><th>说明</th></tr>
+      <tr><td>取首行</td><td>多行提示词只取第一行作为文件名</td></tr>
+      <tr><td>剔除 HTML 标签</td><td>移除 <code>&lt;system-reminder&gt;</code> 等系统注入标签</td></tr>
+      <tr><td>合并空白</td><td>连续空白替换为单个空格</td></tr>
       <tr><td>剔除非法字符</td><td>移除 <code>&lt;&gt;:"/\|?*</code> 以及控制字符</td></tr>
-      <tr><td>截断 50 字符</td><td>防止文件名过长，取前 50 个字符</td></tr>
+      <tr><td>截断 40 字符</td><td>防止文件名过长，取前 40 个字符</td></tr>
       <tr><td>trim 修剪</td><td>去除首尾空白</td></tr>
+      <tr><td>空值回退</td><td>如果结果为空，使用 <code>untitled</code> 作为默认主题</td></tr>
     </table>
 
-    <h3 id="debug-log">3.6 调试日志</h3>
+    <h3 id="debug-log">3.5 调试日志</h3>
     <p>设置环境变量 <code>PROMPT_RECORDER_DEBUG=1</code> 可启用调试日志，记录到 <code>.agent/prompts-log/log.txt</code>：</p>
     <pre>[2026-06-04T22:52:00.000Z] [prompt-recorder] event=message.part.updated,
 role=user, sessionID=ses_xxx, textLength=234, textPreview=读取...</pre>
 
-    <h3 id="readme-version">3.7 版本信息与 Readme</h3>
+    <h3 id="readme-version">3.6 版本信息与 Readme</h3>
     <p>当 <code>session.updated</code> 事件首次触发时，插件在 <code>.agent/</code> 目录下生成 <code>opencode-prompt-recorder-readme.txt</code>，包含版本号、作者信息和项目地址。通过 <code>versionFileWritten</code> 布尔标记确保只写入一次。</p>
     <div class="info-box success">
       <strong>✅ 设计特点：</strong> 版本号从 <code>dist/package.json</code> 动态读取，确保编译打包后的版本信息始终与发布版本一致。如果读取失败则回退为 <code>"unknown"</code>。
@@ -264,21 +227,19 @@ role=user, sessionID=ses_xxx, textLength=234, textPreview=读取...</pre>
 
   <section id="testing">
     <h2>四、测试</h2>
-    <p>测试代码位于 <code>test/index.ts</code>（131 行），采用<strong>临时目录驱动的集成测试</strong>模式。测试不使用任何测试框架，直接用 Node.js 的 assert 和 try/catch。</p>
+    <p>测试代码位于 <code>test/index.ts</code>（97 行），采用<strong>临时目录驱动的集成测试</strong>模式。测试不使用任何测试框架，直接用 Node.js 的 assert 和 try/catch。</p>
 
     <h3 id="test-cases">4.1 测试用例</h3>
     <table>
       <tr><th>用例</th><th>场景</th><th>验证点</th></tr>
-      <tr><td><code>testCrossDayMerge</code></td><td>Day1 创建文件，Day2 查找同一 session</td><td>找到的文件路径匹配 Day1 文件</td></tr>
-      <tr><td><code>testCrossDayAppend</code></td><td>Day1 创建文件，Day2 追加内容</td><td>最终文件同时包含两天内容</td></tr>
-      <tr><td><code>testDifferentSession</code></td><td>查找不存在的 sessionId</td><td>返回 null</td></tr>
+      <tr><td><code>testSanitizeFilename</code></td><td>文件名净化过程</td><td>首行提取、HTML剥离、非法字符清除、截断、空值回退</td></tr>
+      <tr><td><code>testIsSystemInjected</code></td><td>系统注入检测</td><td>正确识别系统标签，不误判正常消息</td></tr>
     </table>
 
     <pre>async function main() {
   await setup()
-  await testCrossDayMerge()
-  await testCrossDayAppend()
-  await testDifferentSession()
+  await testSanitizeFilename()
+  await testIsSystemInjected()
   await cleanup()
 }</pre>
 
@@ -306,7 +267,7 @@ bun add -g opencode-prompt-recorder</pre>
     <ul>
       <li>每次用户发送提示词，插件被动接收事件，无需任何手动操作</li>
       <li>提示词文件写入项目根目录的 <code>.agent/prompts/</code></li>
-      <li>同一会话的提示词持续追加到同一文件，跨天也自动合并</li>
+      <li>每个用户提示词写入独立的文件，以时间戳开头</li>
       <li>AI 回复不会被记录（仅录制 role 为 user 的消息）</li>
     </ul>
 
@@ -321,7 +282,7 @@ bun add -g opencode-prompt-recorder</pre>
       <strong>⚠️ 注意事项：</strong>
       <ul>
         <li>插件需要项目根目录的写入权限以创建 <code>.agent/prompts/</code> 目录</li>
-        <li>文件名中的特殊字符会被自动清理，过长提示词只取前 50 字符</li>
+        <li>文件名中的特殊字符会被自动清理，过长提示词只取前 40 字符</li>
         <li>去重机制仅在插件进程生命周期内有效，重启后 Set 清空</li>
       </ul>
     </div>

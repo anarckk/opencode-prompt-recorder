@@ -1,4 +1,4 @@
-import { mkdir, appendFile, readdir, writeFile, readFile } from "fs/promises"
+import { mkdir, appendFile, writeFile, readFile } from "fs/promises"
 import { join, dirname } from "path"
 import { fileURLToPath } from "url"
 import type { Plugin } from "@opencode-ai/plugin"
@@ -67,47 +67,12 @@ function formatTime(date: Date): string {
 }
 
 /**
- * 在所有日期目录中查找与 sessionId 关联的现有文件
- * @param directory - 项目根目录
- * @param sessionId - 会话ID
- * @returns 找到的文件路径，未找到则返回 null
- */
-async function findExistingFile(promptsBaseDir: string, sessionId: string): Promise<string | null> {
-  if (!sessionId) return null
-
-  async function searchDir(dir: string, skipTask: boolean): Promise<string | null> {
-    try {
-      const entries = await readdir(dir, { withFileTypes: true })
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          if (skipTask && entry.name === "task") continue
-          const found = await searchDir(join(dir, entry.name), skipTask)
-          if (found) return found
-        } else if (entry.isFile() && entry.name.includes(`-${sessionId}-`)) {
-          return join(dir, entry.name)
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return null
-  }
-
-  const found = await searchDir(promptsBaseDir, true)
-  if (found) return found
-
-  const taskDir = join(promptsBaseDir, "task")
-  return searchDir(taskDir, false)
-}
-
-/**
  * OpenCode 插件：自动记录用户提示词到文件
  * 
  * 功能：
  * - 监听 message.updated 事件，获取用户发送的提示词
  * - 将提示词按日期保存到 .agent/prompts/yyyy/MM/dd/ 目录
- * - 文件名格式：yyyyMMdd-HHmm-{会话id}-{提示词主题}.md
- * - 同一会话ID的所有消息追加到同一个文件（通过查找包含会话ID的文件实现）
+ * - 文件名格式：yyMMddHHmm-{提示词主题}.md
  * - 文件内容格式：
  *   ============ {HH:mm} ============
  *   {用户提示词1}
@@ -190,24 +155,16 @@ export const OpenCodePromptRecorder: Plugin = async ({ directory, client }) => {
 
             await mkdir(promptDir, { recursive: true })
 
-            const searchBase = isTaskSession ? join(promptsBaseDir, "task") : promptsBaseDir
-            const existingFile = await findExistingFile(searchBase, sessionID)
             const time = formatTime(now)
-            const dateStr = `${yyyy}${MM}${dd}`
+            const yy = yyyy.slice(-2)
 
             const timeTitle = `============ ${time} ============`
-            const fileContent = existingFile
-              ? `\n\n${timeTitle}\n\n${text}`
-              : `${timeTitle}\n\n${text}`
+            const fileContent = `${timeTitle}\n\n${text}`
 
-            if (existingFile) {
-              await appendFile(existingFile, fileContent)
-            } else {
-              const topic = sanitizeFilename(text)
-              const filename = `${dateStr}-${HH}${mm}-${sessionID}-${topic}.md`
-              const filepath = join(promptDir, filename)
-              await appendFile(filepath, fileContent)
-            }
+            const topic = sanitizeFilename(text)
+            const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}.md`
+            const filepath = join(promptDir, filename)
+            await appendFile(filepath, fileContent)
           }
         }
       }
