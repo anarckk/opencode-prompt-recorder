@@ -31,10 +31,11 @@ bun add -g opencode-prompt-recorder
 
 ## 工作原理
 
-1. 插件监听 OpenCode 消息事件（`message.updated` 和 `message.part.updated`）
+1. 插件监听 OpenCode 事件（`message.updated`、`message.part.updated`、`session.created`、`session.updated`）
 2. 每次用户消息时，提取提示词文本和会话 ID
 3. 同一 session 的消息合并到同一个文件，按日期组织存储
-4. 文件首行记录 SessionID，每条消息带有时间戳
+4. task 工具创建的子 agent 会话自动存入 `task/` 子目录，与主会话隔离
+5. 文件首行记录 SessionID，每条消息带有时间戳
 
 ## 文件结构
 
@@ -43,6 +44,11 @@ bun add -g opencode-prompt-recorder
 ```
 .agent/
 └── prompts/
+    ├── task/
+    │   └── 2026/
+    │       └── 06/
+    │           └── 05/
+    │               └── 2606051003-子任务分析.txt
     └── 2026/
         └── 06/
             └── 05/
@@ -66,11 +72,11 @@ bun add -g opencode-prompt-recorder
 ```markdown
 ============ SessionID: ses_xxxxx ============
 
-============ 2026-06-05 10:05 ============
+============ 2026-06-05 10:05:30 ============
 
 什么是 AI？
 
-============ 2026-06-05 10:50 ============
+============ 2026-06-05 10:50:15 ============
 
 如何编写 hello world 程序？
 ```
@@ -90,6 +96,7 @@ bun add -g opencode-prompt-recorder
 - 同一 session 的后续消息追加到同一文件，文件名不变
 - 文件名中的特殊字符会被自动清理（移除 `<>:"/\|?*` 及控制字符）
 - 文件名截断至最多 40 个字符
+- 若目标文件名已存在（极低概率），自动附加 `-xxxx` 随机后缀以避免覆盖
 
 ## 使用场景
 

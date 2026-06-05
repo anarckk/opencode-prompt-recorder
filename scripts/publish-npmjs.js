@@ -43,10 +43,8 @@ function build() {
 
   rmSync(join(rootDir, 'dist'), { recursive: true, force: true });
 
-  const shell = process.platform === 'win32' ? 'powershell.exe' : undefined;
   runCommand(
     'npx esbuild index.ts --bundle --platform=node --outdir=dist --format=esm --external:@opencode-ai/plugin --minify',
-    { shell }
   );
 
   const pkg = readFileSync(join(rootDir, 'package.json'), 'utf-8');

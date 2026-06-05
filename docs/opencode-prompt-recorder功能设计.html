@@ -62,7 +62,7 @@
     <p><strong>opencode-prompt-recorder</strong> 是一个为 OpenCode AI 编程助手设计的插件，核心功能是<strong>自动捕获并持久化用户在聊天对话中发送的提示词</strong>到本地文件系统。它作为审计日志、训练数据收集和会话历史工具，无需用户任何手动操作即可后台静默运行。</p>
 
     <div class="info-box">
-      <strong>💡 项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp;       版本：<code>1.7.9</code> &nbsp;|&nbsp; 作者：<code>anarckk</code> &nbsp;|&nbsp; 许可：MIT
+      <strong>💡 项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp;       版本：<code>1.8.0</code> &nbsp;|&nbsp; 作者：<code>anarckk</code> &nbsp;|&nbsp; 许可：MIT
     </div>
 
     <h3>功能特性</h3>
@@ -81,9 +81,9 @@
       <li><strong>会话合并</strong>：同一会话的多条消息合并到同一个文件，避免碎片化。首条消息创建文件，后续消息追加写入</li>
       <li><strong>Task 子会话分离</strong>：task 工具创建的子 agent 会话的提示词自动存入 <code>.agent/prompts/task/yyyy/MM/dd/</code> 目录，与主会话隔离</li>
       <li><strong>文件名格式</strong>：<code>yyMMddHHmm-{主题}.txt</code>，主题优先取自会话标题；标题不存在时回退到首条消息文本。若文件创建后标题才到达，文件自动重命名匹配标题（<code>session.updated</code> 事件 + 待处理队列 + 5 秒 SDK 查询兜底）</li>
-      <li><strong>文件名净化</strong>：移除 <code>&lt;&gt;:"/\|?*</code> 及控制字符、HTML 标签，截断至 40 字符，空白时回退为 <code>untitled</code></li>
+      <li><strong>文件名净化</strong>：移除 <code>&lt;&gt;:"/\|?*</code>、控制字符、Unicode 控制字符（零宽空格/BOM/方向覆盖等）、HTML 标签，截断至 40 字符，空白时回退为 <code>untitled</code></li>
       <li><strong>缓存写入</strong>：<code>sessionFileCache</code> 缓存文件路径，避免重复目录计算和 IO 开销</li>
-      <li><strong>跨天支持</strong>：每条消息的时间戳包含日期（<code>yyyy-MM-dd HH:mm</code>），目录按首条消息日期决定</li>
+      <li><strong>跨天支持</strong>：每条消息的时间戳包含日期（<code>yyyy-MM-dd HH:mm:ss</code>），目录按首条消息日期决定</li>
     </ul>
 
     <h4>🏷️ 会话标题</h4>
@@ -103,7 +103,7 @@
     <h4>🛡️ 可靠性</h4>
     <ul>
       <li><strong>错误静默</strong>：所有异常被捕获并静默处理，不干扰 OpenCode 正常运行</li>
-      <li><strong>版本化 Readme</strong>：首次 <code>session.updated</code> 事件时自动写入 <code>.agent/opencode-prompt-recorder-readme.txt</code>，记录版本和项目信息</li>
+      <li><strong>版本化 Readme</strong>：插件启动时自动写入 <code>.agent/opencode-prompt-recorder-readme.txt</code>，记录版本和项目信息</li>
       <li><strong>调试日志</strong>：设置 <code>PROMPT_RECORDER_DEBUG=1</code> 环境变量后，详细日志写入 <code>.agent/prompts-log/log.txt</code></li>
     </ul>
 
@@ -121,7 +121,7 @@
       <tr><td>编程语言</td><td>TypeScript (ES2022)</td></tr>
       <tr><td>运行时</td><td>Node.js / Bun</td></tr>
       <tr><td>依赖</td><td>仅 peer dependency：<code>@opencode-ai/plugin &gt;=0.15.0</code></td></tr>
-      <tr><td>代码规模</td><td>index.ts ~294 行 + updateOps.ts ~188 行，零外部运行时依赖</td></tr>
+      <tr><td>代码规模</td><td>index.ts ~316 行 + updateOps.ts ~183 行，零外部运行时依赖</td></tr>
       <tr><td>构建工具</td><td>esbuild</td></tr>
       <tr><td>包管理</td><td>npm 发布，ESM 模块</td></tr>
     </table>
@@ -206,7 +206,7 @@
       <tr><th></th><th>统一 event 钩子（选中）</th><th>多个独立钩子（message.updated 等）</th></tr>
       <tr><td>优点</td><td>状态共享在同一闭包作用域；减少注册代码</td><td>职责清晰；每种事件独立处理</td></tr>
       <tr><td>缺点</td><td>一个函数内处理所有事件类型，体量增大</td><td>需要跨钩子共享状态（通过 ctx 或外部变量）</td></tr>
-      <tr><td>结论</td><td colspan="2">事件类型仅 3 种，统一处理器足够简洁。若扩展到 10+ 事件类型则应拆分</td></tr>
+      <tr><td>结论</td><td colspan="2">事件类型仅 4 种，统一处理器足够简洁。若扩展到 10+ 事件类型则应拆分</td></tr>
     </table>
 
     <h4>决策 5：会话合并 vs 每条消息独立文件</h4>
@@ -264,7 +264,7 @@
       <tr><td>超长标题 / 提示词（&gt;40 字符）</td><td>截断至 40 字符作为文件名；标题为空时回退到首条消息文本</td></tr>
       <tr><td>系统注入标签（海马体等）</td><td>isSystemInjected() 检测并跳过</td></tr>
       <tr><td>并发消息事件</td><td>通过 processedMessageKeys 去重</td></tr>
-      <tr><td>跨天会话</td><td>时间戳含日期（yyyy-MM-dd HH:mm），按首次消息日期分目录</td></tr>
+      <tr><td>跨天会话</td><td>时间戳含日期（yyyy-MM-dd HH:mm:ss），按首次消息日期分目录</td></tr>
       <tr><td>消息包含 HTML 标签</td><td>sanitizeFilename 剔除 &lt;...&gt;</td></tr>
       <tr><td>Windows 非法文件名字符</td><td>正则替换 <code>&lt;&gt;:"/\|?*</code> 及控制字符</td></tr>
       <tr><td>插件进程重启</td><td>去重 Set 清空，但文件追加写入不会产生重复</td></tr>
@@ -277,13 +277,13 @@
     <p>插件采用<strong>事件驱动 + 函数式闭包</strong>的架构模式。整个插件是一个符合 <code>@opencode-ai/plugin</code> 的 <code>Plugin</code> 接口的工厂函数，内部使用 JavaScript 闭包来维护运行时状态。</p>
 
     <h3 id="event-driven">3.1 事件驱动模型</h3>
-    <p>插件注册一个统一的 <code>event</code> 异步处理器，监听三种事件类型：</p>
+    <p>插件注册一个统一的 <code>event</code> 异步处理器，监听四种事件类型：</p>
     <table>
       <tr><th>事件类型</th><th>触发时机</th><th>处理动作</th></tr>
       <tr><td><code>message.updated</code></td><td>消息元数据更新时</td><td>提取 <code>messageID to role</code> 映射存入 Map，供后续事件使用</td></tr>
       <tr><td><code>message.part.updated</code></td><td>消息内容部分更新时</td><td>核心逻辑：检测 task、检查 role、去重、按 session 缓存写入或追加</td></tr>
       <tr><td><code>session.created</code></td><td>会话创建时</td><td>捕获会话标题存入 sessionTitleMap，若有缓存文件则重命名以匹配标题</td></tr>
-      <tr><td><code>session.updated</code></td><td>会话更新时</td><td>捕获标题变更，文件自动重命名匹配新标题（若文件未创建则暂存待处理）+ 写入版本化的 readme 文件（仅首次触发）</td></tr>
+      <tr><td><code>session.updated</code></td><td>会话更新时</td><td>捕获标题变更，文件自动重命名匹配新标题（若文件未创建则暂存待处理）</td></tr>
     </table>
 
     <div class="mermaid-container">

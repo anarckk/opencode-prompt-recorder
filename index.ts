@@ -31,7 +31,7 @@ async function getVersion(): Promise<string> {
   }
 }
 
-const ILLEGAL_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f]/g
+const ILLEGAL_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f\u200B-\u200F\u2028-\u202E\uFEFF]/g
 
 function sanitizeFilename(str: string): string {
   const firstLine = str.split('\n')[0].trim()
@@ -51,14 +51,15 @@ function formatDate(date: Date) {
   const dd = String(date.getDate()).padStart(2, '0')
   const HH = String(date.getHours()).padStart(2, '0')
   const mm = String(date.getMinutes()).padStart(2, '0')
-  return { yyyy, MM, dd, HH, mm }
+  const ss = String(date.getSeconds()).padStart(2, '0')
+  return { yyyy, MM, dd, HH, mm, ss }
 }
 
-export const OpenCodePromptRecorder: Plugin = async (ctx) => {
+const OpenCodePromptRecorder: Plugin = async (ctx) => {
   startAutoUpdate(ctx, true)
   const { directory } = ctx
-  let versionFileWritten = false
-  const sessionTitleMap = new Map<string, string>()
+  void writeVersionReadme()
+  const sessionTitleMap = new Map<string, { title: string; time: number }>()
   const messageRoleMap = new Map<string, { role: string; time: number }>()
   const processedMessageKeys = new Map<string, number>()
   const taskSessionIds = new Map<string, number>()
@@ -66,8 +67,11 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
   const CACHE_MAX_SIZE = 200
   const MAX_MAP_SIZE = 2000
   const MAX_MAP_AGE = 24 * 60 * 60 * 1000
+  const PENDING_RENAME_MAX_AGE = 60 * 60 * 1000
   const sessionFileCache = new Map<string, { filepath: string; time: number }>()
-  const pendingRenames = new Map<string, string>()
+  const pendingRenames = new Map<string, { title: string; time: number }>()
+  const FILE_EXT = ".txt"
+  const pendingSdkTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   function pruneCache() {
     if (sessionFileCache.size < CACHE_MAX_SIZE) return
@@ -94,6 +98,16 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
         if (now - t > MAX_MAP_AGE) taskSessionIds.delete(k)
       }
     }
+    if (sessionTitleMap.size > MAX_MAP_SIZE) {
+      for (const [k, v] of sessionTitleMap) {
+        if (now - v.time > MAX_MAP_AGE) sessionTitleMap.delete(k)
+      }
+    }
+    if (pendingRenames.size > 0) {
+      for (const [k, v] of pendingRenames) {
+        if (now - v.time > PENDING_RENAME_MAX_AGE) pendingRenames.delete(k)
+      }
+    }
   }
 
   async function renameFileWithTitle(cached: { filepath: string; time: number }, title: string) {
@@ -101,13 +115,20 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
     const base = basename(cached.filepath)
     const prefix = base.match(/^(\d{10})-/)
     if (!prefix) return
-    const newFilepath = join(dir, `${prefix[1]}-${sanitizeFilename(title)}.txt`)
+    const newFilepath = join(dir, `${prefix[1]}-${sanitizeFilename(title)}${FILE_EXT}`)
     if (newFilepath === cached.filepath) return
     try {
       await rename(cached.filepath, newFilepath)
       cached.filepath = newFilepath
-    } catch (e) {
-      console.error(`[prompt-recorder] rename failed: ${cached.filepath}`, e)
+    } catch {
+      const suffix = crypto.randomUUID().slice(0, 8)
+      const fallbackPath = join(dir, `${prefix[1]}-${sanitizeFilename(title)}-${suffix}${FILE_EXT}`)
+      try {
+        await rename(cached.filepath, fallbackPath)
+        cached.filepath = fallbackPath
+      } catch (e) {
+        console.error(`[prompt-recorder] rename failed: ${cached.filepath}`, e)
+      }
     }
   }
 
@@ -115,7 +136,7 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
     const info = event.properties.info as any
     const id = info?.id
     const role = info?.role || info?.message?.role
-    if (id && role) {
+    if (id && role === "user") {
       messageRoleMap.set(id, { role, time: Date.now() })
     }
   }
@@ -152,7 +173,7 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
       return
     }
 
-    const dedupeKey = `${messageID}:${text}`
+    const dedupeKey = messageID ? `${messageID}:${text}` : `${sessionID}:${text}`
     if (processedMessageKeys.has(dedupeKey)) return
     processedMessageKeys.set(dedupeKey, Date.now())
     pruneMaps()
@@ -160,7 +181,7 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
     await debugLog(directory, `[prompt-recorder] event=${event.type}, role=${role}, sessionID=${sessionID}, textLength=${text.length}, textPreview=${text.substring(0, 50)}`)
 
     const now = new Date()
-    const { yyyy, MM, dd, HH, mm } = formatDate(now)
+    const { yyyy, MM, dd, HH, mm, ss } = formatDate(now)
     const promptsBaseDir = join(directory, ".agent", "prompts")
 
     const isTaskSession = taskSessionIds.has(sessionID)
@@ -171,38 +192,41 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
     await mkdir(promptDir, { recursive: true })
 
     const yy = yyyy.slice(-2)
-    const timeTitle = `============ ${yyyy}-${MM}-${dd} ${HH}:${mm} ============`
+    const timeTitle = `============ ${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss} ============`
 
     const cached = sessionFileCache.get(sessionID)
     if (cached) {
       cached.time = Date.now()
       await appendFile(cached.filepath, `\n\n${timeTitle}\n\n${text}`)
     } else {
-      const topic = sanitizeFilename(sessionTitleMap.get(sessionID) ?? text)
-      const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}.txt`
+      const topic = sanitizeFilename(sessionTitleMap.get(sessionID)?.title ?? text)
+      const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}${FILE_EXT}`
       const filepath = join(promptDir, filename)
       const sessionHeader = `============ SessionID: ${sessionID} ============`
       await writeFile(filepath, `${sessionHeader}\n\n${timeTitle}\n\n${text}`)
       sessionFileCache.set(sessionID, { filepath, time: Date.now() })
       pruneCache()
 
-      const pendingTitle = pendingRenames.get(sessionID)
-      if (pendingTitle) {
+      const pendingRename = pendingRenames.get(sessionID)
+      if (pendingRename) {
         pendingRenames.delete(sessionID)
         const newEntry = sessionFileCache.get(sessionID)
         if (newEntry) {
-          await renameFileWithTitle(newEntry, pendingTitle)
+          await renameFileWithTitle(newEntry, pendingRename.title)
         }
       }
 
-      setTimeout(async () => {
+      const existingTimer = pendingSdkTimers.get(sessionID)
+      if (existingTimer) clearTimeout(existingTimer)
+      const timer = setTimeout(async () => {
+        pendingSdkTimers.delete(sessionID)
         try {
           const res = await ctx.client.session.get({ path: { id: sessionID } })
           const fetchedTitle = (res as any)?.data?.title
           if (!fetchedTitle) return
-          const oldTitle = sessionTitleMap.get(sessionID)
+          const oldTitle = sessionTitleMap.get(sessionID)?.title
           if (fetchedTitle === oldTitle) return
-          sessionTitleMap.set(sessionID, fetchedTitle)
+          sessionTitleMap.set(sessionID, { title: fetchedTitle, time: Date.now() })
           const cachedEntry = sessionFileCache.get(sessionID)
           if (cachedEntry) {
             await renameFileWithTitle(cachedEntry, fetchedTitle)
@@ -211,13 +235,14 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
           // ignore
         }
       }, 5000)
+      pendingSdkTimers.set(sessionID, timer)
     }
   }
 
   async function handleSessionCreated(event: { properties: any }) {
     const info = (event.properties as any).info
     if (info?.id && info?.title) {
-      sessionTitleMap.set(info.id, info.title)
+      sessionTitleMap.set(info.id, { title: info.title, time: Date.now() })
       const cached = sessionFileCache.get(info.id)
       if (cached) {
         await renameFileWithTitle(cached, info.title)
@@ -225,26 +250,12 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
     }
   }
 
-  async function handleSessionUpdated(event: { properties: any }) {
-    const info = (event.properties as any).info
-    if (info?.id && info?.title) {
-      const oldTitle = sessionTitleMap.get(info.id)
-      sessionTitleMap.set(info.id, info.title)
-      if (oldTitle !== info.title) {
-        const cached = sessionFileCache.get(info.id)
-        if (cached) {
-          await renameFileWithTitle(cached, info.title)
-        } else {
-          pendingRenames.set(info.id, info.title)
-        }
-      }
-    }
-    if (!versionFileWritten) {
-      try {
-        const version = await getVersion()
-        const readmeDir = join(directory, ".agent")
-        const readmeFile = join(readmeDir, "opencode-prompt-recorder-readme.txt")
-        const content = `# OpenCode Prompt Recorder
+  async function writeVersionReadme() {
+    try {
+      const version = await getVersion()
+      const readmeDir = join(directory, ".agent")
+      const readmeFile = join(readmeDir, "opencode-prompt-recorder-readme.txt")
+      const content = `# OpenCode Prompt Recorder
 
 自动记录用户提示词到 .agent/prompts 目录的插件。
 
@@ -252,21 +263,32 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
 作者：anarckk  
 项目地址：https://github.com/anarckk/opencode-prompt-recorder`
 
-        try {
-          const existing = await readFile(readmeFile, "utf-8")
-          if (existing === content) {
-            versionFileWritten = true
-            return
-          }
-        } catch {
-          // file doesn't exist, continue to write
-        }
-
-        await mkdir(readmeDir, { recursive: true })
-        await writeFile(readmeFile, content)
-        versionFileWritten = true
+      try {
+        const existing = await readFile(readmeFile, "utf-8")
+        if (existing === content) return
       } catch {
-        // ignore readme write errors
+        // file doesn't exist, continue to write
+      }
+
+      await mkdir(readmeDir, { recursive: true })
+      await writeFile(readmeFile, content)
+    } catch {
+      // ignore readme write errors
+    }
+  }
+
+  async function handleSessionUpdated(event: { properties: any }) {
+    const info = (event.properties as any).info
+    if (info?.id && info?.title) {
+      const oldTitle = sessionTitleMap.get(info.id)?.title
+      sessionTitleMap.set(info.id, { title: info.title, time: Date.now() })
+      if (oldTitle !== info.title) {
+        const cached = sessionFileCache.get(info.id)
+        if (cached) {
+          await renameFileWithTitle(cached, info.title)
+        } else {
+          pendingRenames.set(info.id, { title: info.title, time: Date.now() })
+        }
       }
     }
   }

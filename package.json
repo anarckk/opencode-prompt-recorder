@@ -7,8 +7,7 @@
   "module": "./dist/index.js",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "require": "./dist/index.js"
+      "import": "./dist/index.js"
     }
   },
   "files": [
@@ -18,8 +17,7 @@
     "build": "node -e \"fs.rmSync('dist',{force:true,recursive:true})\" && npx esbuild index.ts --bundle --platform=node --outdir=dist --format=esm --external:@opencode-ai/plugin --minify && node -e \"fs.copyFileSync('package.json','dist/package.json')\"",
     "build:uncompressed": "node -e \"fs.rmSync('dist',{force:true,recursive:true})\" && npx esbuild index.ts --bundle --platform=node --outdir=dist --format=esm --external:@opencode-ai/plugin && node -e \"fs.copyFileSync('package.json','dist/package.json')\"",
     "prepublishOnly": "npm run build",
-    "publish": "node scripts/publish-npmjs.js",
-    "test": "npx tsx test/index.ts"
+    "publish": "node scripts/publish-npmjs.js"
   },
   "keywords": [
     "opencode",
@@ -46,7 +44,6 @@
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^0.15.0",
-    "@types/bun": "^1.3.1",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.3"
   }

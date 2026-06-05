@@ -39,7 +39,7 @@ export function startAutoUpdate(ctx: PluginInput, enabled: boolean): void {
         })
       }, 5000)
     })
-    .catch(() => {})
+    .catch((e) => { console.error(`[prompt-recorder] auto-update check failed:`, e) })
     .finally(() => clearTimeout(timeout))
 }
 
