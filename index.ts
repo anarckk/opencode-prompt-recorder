@@ -89,6 +89,7 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
   const CACHE_MAX_IDLE_MS = 24 * 60 * 60 * 1000
   const CACHE_MAX_SIZE = 200
   const sessionFileCache = new Map<string, { filepath: string; time: number }>()
+  const pendingRenames = new Map<string, string>()
   function pruneCache() {
     if (sessionFileCache.size < CACHE_MAX_SIZE) return
     const now = Date.now()
@@ -204,6 +205,32 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
               await writeFile(filepath, `${sessionHeader}\n\n${timeTitle}\n\n${text}`)
               sessionFileCache.set(sessionID, { filepath, time: Date.now() })
               pruneCache()
+
+              const pendingTitle = pendingRenames.get(sessionID)
+              if (pendingTitle) {
+                pendingRenames.delete(sessionID)
+                const newEntry = sessionFileCache.get(sessionID)
+                if (newEntry) {
+                  await renameFileWithTitle(newEntry, pendingTitle)
+                }
+              }
+
+              setTimeout(async () => {
+                try {
+                  const res = await ctx.client.session.get({ sessionID }) as any
+                  const fetchedTitle = res?.data?.title
+                  if (!fetchedTitle) return
+                  const oldTitle = sessionTitleMap.get(sessionID)
+                  if (fetchedTitle === oldTitle) return
+                  sessionTitleMap.set(sessionID, fetchedTitle)
+                  const cachedEntry = sessionFileCache.get(sessionID)
+                  if (cachedEntry) {
+                    await renameFileWithTitle(cachedEntry, fetchedTitle)
+                  }
+                } catch {
+                  // ignore
+                }
+              }, 5000)
             }
           }
         }
@@ -231,6 +258,8 @@ export const OpenCodePromptRecorder: Plugin = async (ctx) => {
             const cached = sessionFileCache.get(info.id)
             if (cached) {
               await renameFileWithTitle(cached, info.title)
+            } else {
+              pendingRenames.set(info.id, info.title)
             }
           }
         }

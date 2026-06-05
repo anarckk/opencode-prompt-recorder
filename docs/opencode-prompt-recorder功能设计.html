@@ -62,7 +62,7 @@
     <p><strong>opencode-prompt-recorder</strong> 是一个为 OpenCode AI 编程助手设计的插件，核心功能是<strong>自动捕获并持久化用户在聊天对话中发送的提示词</strong>到本地文件系统。它作为审计日志、训练数据收集和会话历史工具，无需用户任何手动操作即可后台静默运行。</p>
 
     <div class="info-box">
-      <strong>💡 项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp; 版本：<code>1.7.6</code> &nbsp;|&nbsp; 作者：<code>anarckk</code> &nbsp;|&nbsp; 许可：MIT
+      <strong>💡 项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp;       版本：<code>1.7.8</code> &nbsp;|&nbsp; 作者：<code>anarckk</code> &nbsp;|&nbsp; 许可：MIT
     </div>
 
     <h3>功能特性</h3>
@@ -80,7 +80,7 @@
       <li><strong>时间目录</strong>：按 <code>.agent/prompts/yyyy/MM/dd/</code> 分层存储，日期一目了然</li>
       <li><strong>会话合并</strong>：同一会话的多条消息合并到同一个文件，避免碎片化。首条消息创建文件，后续消息追加写入</li>
       <li><strong>Task 子会话分离</strong>：task 工具创建的子 agent 会话的提示词自动存入 <code>.agent/prompts/task/yyyy/MM/dd/</code> 目录，与主会话隔离</li>
-      <li><strong>文件名格式</strong>：<code>yyMMddHHmm-{主题}.txt</code>，主题优先取自会话标题；标题不存在时回退到首条消息文本。若文件创建后标题才到达，文件自动重命名匹配标题</li>
+      <li><strong>文件名格式</strong>：<code>yyMMddHHmm-{主题}.txt</code>，主题优先取自会话标题；标题不存在时回退到首条消息文本。若文件创建后标题才到达，文件自动重命名匹配标题（<code>session.updated</code> 事件 + 待处理队列 + 5 秒 SDK 查询兜底）</li>
       <li><strong>文件名净化</strong>：移除 <code>&lt;&gt;:"/\|?*</code> 及控制字符、HTML 标签，截断至 40 字符，空白时回退为 <code>untitled</code></li>
       <li><strong>缓存写入</strong>：<code>sessionFileCache</code> 缓存文件路径，避免重复目录计算和 IO 开销</li>
       <li><strong>跨天支持</strong>：每条消息的时间戳包含日期（<code>yyyy-MM-dd HH:mm</code>），目录按首条消息日期决定</li>
@@ -89,7 +89,7 @@
     <h4>🏷️ 会话标题</h4>
     <ul>
       <li><strong>实时捕获</strong>：监听 <code>session.created</code> 和 <code>session.updated</code> 事件，将 <code>event.properties.info.title</code> 存入 <code>sessionTitleMap</code></li>
-      <li><strong>文件名优先</strong>：创建文件时优先用会话标题作文件名；标题不存在时回退到首条消息文本。若文件创建后标题才到达，自动重命名文件</li>
+      <li><strong>文件名优先</strong>：创建文件时优先用会话标题作文件名；标题不存在时回退到首条消息文本。若文件创建后标题才到达，自动重命名文件（事件先于文件创建的竞态通过待处理队列解决，5 秒后 SDK 查询兜底修正）</li>
     </ul>
 
     <h4>🔄 自动更新</h4>
@@ -121,7 +121,7 @@
       <tr><td>编程语言</td><td>TypeScript (ES2022)</td></tr>
       <tr><td>运行时</td><td>Node.js / Bun</td></tr>
       <tr><td>依赖</td><td>仅 peer dependency：<code>@opencode-ai/plugin &gt;=0.15.0</code></td></tr>
-      <tr><td>代码规模</td><td>单文件 ~246 行，零外部运行时依赖</td></tr>
+      <tr><td>代码规模</td><td>单文件 ~269 行，零外部运行时依赖</td></tr>
       <tr><td>构建工具</td><td>esbuild</td></tr>
       <tr><td>包管理</td><td>npm 发布，ESM 模块</td></tr>
     </table>
@@ -283,7 +283,7 @@
       <tr><td><code>message.updated</code></td><td>消息元数据更新时</td><td>提取 <code>messageID to role</code> 映射存入 Map，供后续事件使用</td></tr>
       <tr><td><code>message.part.updated</code></td><td>消息内容部分更新时</td><td>核心逻辑：检测 task、检查 role、去重、按 session 缓存写入或追加</td></tr>
       <tr><td><code>session.created</code></td><td>会话创建时</td><td>捕获会话标题存入 sessionTitleMap，若有缓存文件则重命名以匹配标题</td></tr>
-      <tr><td><code>session.updated</code></td><td>会话更新时</td><td>捕获标题变更，文件自动重命名匹配新标题 + 写入版本化的 readme 文件（仅首次触发）</td></tr>
+      <tr><td><code>session.updated</code></td><td>会话更新时</td><td>捕获标题变更，文件自动重命名匹配新标题（若文件未创建则暂存待处理）+ 写入版本化的 readme 文件（仅首次触发）</td></tr>
     </table>
 
     <div class="mermaid-container">
@@ -346,7 +346,7 @@ flowchart TD
       <li><strong>快速失败</strong>：前置条件不满足时立即返回，不执行文件操作</li>
       <li><strong>延迟写入</strong>：先做所有检查和查找，最后一次性写入</li>
       <li><strong>会话缓存</strong>：sessionFileCache 避免重复目录计算和 IO</li>
-      <li><strong>会话标题文件名</strong>：通过 <code>session.created</code>/<code>session.updated</code> 事件捕获标题存入 <code>sessionTitleMap</code>，文件创建时优先用标题；标题不存在时回退到首条消息文本。若文件创建后标题才到达，自动重命名文件</li>
+      <li><strong>会话标题文件名</strong>：通过 <code>session.created</code>/<code>session.updated</code> 事件捕获标题存入 <code>sessionTitleMap</code>，文件创建时优先用标题；标题不存在时回退到首条消息文本。若文件创建后标题才到达，自动重命名文件。事件到达早于文件创建的竞态场景通过待处理队列 + 5 秒 SDK 查询双层兜底</li>
     </ul>
   </section>
 
