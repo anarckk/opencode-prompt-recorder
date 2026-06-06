@@ -103,7 +103,6 @@
     <h4>🛡️ 可靠性</h4>
     <ul>
       <li><strong>错误静默</strong>：所有异常被捕获并静默处理，不干扰 OpenCode 正常运行</li>
-      <li><strong>版本化 Readme</strong>：插件启动时自动写入 <code>.agent/opencode-prompt-recorder-readme.txt</code>，记录版本和项目信息</li>
       <li><strong>调试日志</strong>：设置 <code>PROMPT_RECORDER_DEBUG=1</code> 环境变量后，详细日志写入 <code>.agent/prompts-log/log.txt</code></li>
     </ul>
 
@@ -121,7 +120,7 @@
       <tr><td>编程语言</td><td>TypeScript (ES2022)</td></tr>
       <tr><td>运行时</td><td>Node.js / Bun</td></tr>
       <tr><td>依赖</td><td>仅 peer dependency：<code>@opencode-ai/plugin &gt;=0.15.0</code></td></tr>
-      <tr><td>代码规模</td><td>index.ts ~316 行 + updateOps.ts ~183 行，零外部运行时依赖</td></tr>
+      <tr><td>代码规模</td><td>index.ts ~305 行 + updateOps.ts ~183 行，零外部运行时依赖</td></tr>
       <tr><td>构建工具</td><td>esbuild</td></tr>
       <tr><td>包管理</td><td>npm 发布，ESM 模块</td></tr>
     </table>
@@ -249,8 +248,6 @@
       <tr><th>场景</th><th>策略</th></tr>
       <tr><td>目录创建失败</td><td>异常传播到事件循环，OpenCode 自动重试</td></tr>
       <tr><td>文件写入失败</td><td>同上</td></tr>
-      <tr><td>package.json 读取失败</td><td>版本回退为 "unknown"</td></tr>
-      <tr><td>readme 文件写入失败</td><td>静默忽略，不影响主功能</td></tr>
       <tr><td>debug log 写入失败</td><td>console.error 报告，不抛异常</td></tr>
       <tr><td>事件 payload 缺少字段</td><td>多层 fallback 逐级尝试，全部失败则跳过</td></tr>
       <tr><td>synthetic / ignored 部件误入</td><td>主动跳过，避免记录非用户内容</td></tr>
@@ -311,7 +308,7 @@ sequenceDiagram
     Note over PR: capture session title
 
     OC->>PR: session.updated
-    Note over PR: capture title change + write readme
+    Note over PR: capture title change
       </pre>
       <div class="caption">图 1：插件事件处理全景</div>
     </div>

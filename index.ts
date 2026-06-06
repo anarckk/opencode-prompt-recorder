@@ -1,10 +1,7 @@
 import { mkdir, appendFile, writeFile, readFile, rename, readdir } from "fs/promises"
 import { join, dirname, basename } from "path"
-import { fileURLToPath } from "url"
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import { startAutoUpdate } from "./updateOps"
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
 
 async function debugLog(directory: string, msg: string) {
   if (process.env.PROMPT_RECORDER_DEBUG !== "1" && process.env.PROMPT_RECORDER_DEBUG !== "true") return
@@ -16,18 +13,6 @@ async function debugLog(directory: string, msg: string) {
     await appendFile(join(logDir, "log.txt"), logLine)
   } catch (e) {
     console.error("debugLog failed:", e)
-  }
-}
-
-let cachedVersion = ""
-async function getVersion(): Promise<string> {
-  if (cachedVersion) return cachedVersion
-  try {
-    const packageJson = JSON.parse(await readFile(join(__dirname, "package.json"), "utf-8"))
-    cachedVersion = packageJson.version || "unknown"
-    return cachedVersion
-  } catch {
-    return "unknown"
   }
 }
 
@@ -85,7 +70,6 @@ async function scanDirForSession(dir: string, sessionID: string): Promise<string
 const OpenCodePromptRecorder: Plugin = async (ctx) => {
   startAutoUpdate(ctx, true)
   const { directory } = ctx
-  void writeVersionReadme()
   const sessionTitleMap = new Map<string, { title: string; time: number }>()
   const messageRoleMap = new Map<string, { role: string; time: number }>()
   const processedMessageKeys = new Map<string, number>()
@@ -279,33 +263,6 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
       if (cached) {
         await renameFileWithTitle(cached, info.title)
       }
-    }
-  }
-
-  async function writeVersionReadme() {
-    try {
-      const version = await getVersion()
-      const readmeDir = join(directory, ".agent")
-      const readmeFile = join(readmeDir, "opencode-prompt-recorder-readme.txt")
-      const content = `# OpenCode Prompt Recorder
-
-自动记录用户提示词到 .agent/prompts 目录的插件。
-
-版本：${version}
-作者：anarckk  
-项目地址：https://github.com/anarckk/opencode-prompt-recorder`
-
-      try {
-        const existing = await readFile(readmeFile, "utf-8")
-        if (existing === content) return
-      } catch {
-        // file doesn't exist, continue to write
-      }
-
-      await mkdir(readmeDir, { recursive: true })
-      await writeFile(readmeFile, content)
-    } catch {
-      // ignore readme write errors
     }
   }
 
