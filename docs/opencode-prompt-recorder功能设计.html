@@ -80,7 +80,7 @@
       <li><strong>时间目录</strong>：按 <code>.agent/prompts/yyyy/MM/dd/</code> 分层存储，日期一目了然</li>
       <li><strong>会话合并</strong>：同一会话的多条消息合并到同一个文件，避免碎片化。首条消息创建文件，后续消息追加写入</li>
       <li><strong>Task 子会话分离</strong>：task 工具创建的子 agent 会话的提示词自动存入 <code>.agent/prompts/task/yyyy/MM/dd/</code> 目录，与主会话隔离</li>
-      <li><strong>文件名格式</strong>：<code>yyMMddHHmm-{主题}.txt</code>，主题优先取自会话标题；标题不存在时回退到首条消息文本。若文件创建后标题才到达，文件自动重命名匹配标题（<code>session.updated</code> 事件 + pendingRenames 待处理队列 + 5 秒 SDK 查询兜底 + pendingSdkTimers 定时器追踪）；重命名冲突时自动追加随机后缀</li>
+      <li><strong>文件名格式</strong>：<code>yyMMddHHmmss-{主题}.txt</code>，主题优先取自会话标题；标题不存在时回退到首条消息文本。若文件创建后标题才到达，文件自动重命名匹配标题（<code>session.updated</code> 事件 + pendingRenames 待处理队列 + 5 秒 SDK 查询兜底 + pendingSdkTimers 定时器追踪）；重命名冲突时自动追加随机后缀</li>
       <li><strong>文件名净化</strong>：移除 <code>&lt;&gt;:"/\|?*</code>、控制字符、Unicode 控制字符（零宽空格/BOM/方向覆盖等）、HTML 标签，截断至 40 字符，空白时回退为 <code>untitled</code></li>
       <li><strong>缓存写入</strong>：<code>sessionFileCache</code> 缓存文件路径，避免重复目录计算和 IO 开销</li>
       <li><strong>跨天支持</strong>：每条消息的时间戳包含日期（<code>yyyy-MM-dd HH:mm:ss</code>），目录按首条消息日期决定</li>

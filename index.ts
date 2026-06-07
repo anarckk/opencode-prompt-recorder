@@ -123,7 +123,7 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
   async function renameFileWithTitle(cached: { filepath: string; time: number }, title: string) {
     const dir = dirname(cached.filepath)
     const base = basename(cached.filepath)
-    const prefix = base.match(/^(\d{10})-/)
+    const prefix = base.match(/^(\d{10,12})-/)
     if (!prefix) return
     const newFilepath = join(dir, `${prefix[1]}-${sanitizeFilename(title)}${FILE_EXT}`)
     if (newFilepath === cached.filepath) return
@@ -215,7 +215,7 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
         await appendFile(foundPath, `\n\n${timeTitle}\n\n${text}`)
       } else {
         const topic = sanitizeFilename(sessionTitleMap.get(sessionID)?.title ?? text)
-        const filename = `${yy}${MM}${dd}${HH}${mm}-${topic}${FILE_EXT}`
+        const filename = `${yy}${MM}${dd}${HH}${mm}${ss}-${topic}${FILE_EXT}`
         const filepath = join(promptDir, filename)
         const sessionHeader = `============ SessionID: ${sessionID} ============`
         await writeFile(filepath, `${sessionHeader}\n\n${timeTitle}\n\n${text}`)
