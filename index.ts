@@ -192,15 +192,6 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
 
     const now = new Date()
     const { yyyy, MM, dd, HH, mm, ss } = formatDate(now)
-    const promptsBaseDir = join(directory, ".agent", "prompts")
-
-    const isTaskSession = taskSessionIds.has(sessionID)
-    const promptDir = isTaskSession
-      ? join(promptsBaseDir, "task", yyyy, MM, dd)
-      : join(promptsBaseDir, yyyy, MM, dd)
-
-    await mkdir(promptDir, { recursive: true })
-
     const yy = yyyy.slice(-2)
     const timeTitle = `============ ${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss} ============`
 
@@ -214,6 +205,12 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
         sessionFileCache.set(sessionID, { filepath: foundPath, time: Date.now() })
         await appendFile(foundPath, `\n\n${timeTitle}\n\n${text}`)
       } else {
+        const promptsBaseDir = join(directory, ".agent", "prompts")
+        const isTaskSession = taskSessionIds.has(sessionID)
+        const promptDir = isTaskSession
+          ? join(promptsBaseDir, "task", yyyy, MM, dd)
+          : join(promptsBaseDir, yyyy, MM, dd)
+        await mkdir(promptDir, { recursive: true })
         const topic = sanitizeFilename(sessionTitleMap.get(sessionID)?.title ?? text)
         const filename = `${yy}${MM}${dd}${HH}${mm}${ss}-${topic}${FILE_EXT}`
         const filepath = join(promptDir, filename)
