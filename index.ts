@@ -8,7 +8,7 @@ async function debugLog(directory: string, msg: string) {
   const time = new Date().toISOString()
   const logLine = `[${time}] ${msg}\n`
   try {
-    const logDir = join(directory, ".agent", "prompts-log")
+    const logDir = join(directory, ".prompts-log")
     await mkdir(logDir, { recursive: true })
     await appendFile(join(logDir, "log.txt"), logLine)
   } catch (e) {
@@ -43,7 +43,7 @@ function formatDate(date: Date) {
 const FILE_EXT = ".txt"
 
 async function findSessionFile(directory: string, sessionID: string): Promise<string | undefined> {
-  return scanDirForSession(join(directory, ".agent", "prompts"), sessionID)
+  return scanDirForSession(join(directory, ".prompts"), sessionID)
 }
 
 async function scanDirForSession(dir: string, sessionID: string): Promise<string | undefined> {
@@ -188,6 +188,11 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     processedMessageKeys.set(dedupeKey, Date.now())
     pruneMaps()
 
+    if (taskSessionIds.has(sessionID)) {
+      await debugLog(directory, `[prompt-recorder] skipped task session: ${sessionID}`)
+      return
+    }
+
     await debugLog(directory, `[prompt-recorder] event=${event.type}, role=${role}, sessionID=${sessionID}, textLength=${text.length}, textPreview=${text.substring(0, 50)}`)
 
     const now = new Date()
@@ -205,11 +210,7 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
         sessionFileCache.set(sessionID, { filepath: foundPath, time: Date.now() })
         await appendFile(foundPath, `\n\n${timeTitle}\n\n${text}`)
       } else {
-        const promptsBaseDir = join(directory, ".agent", "prompts")
-        const isTaskSession = taskSessionIds.has(sessionID)
-        const promptDir = isTaskSession
-          ? join(promptsBaseDir, "task", yyyy, MM, dd)
-          : join(promptsBaseDir, yyyy, MM, dd)
+        const promptDir = join(directory, ".prompts", yyyy, MM, dd)
         await mkdir(promptDir, { recursive: true })
         const topic = sanitizeFilename(sessionTitleMap.get(sessionID)?.title ?? text)
         const filename = `${yy}${MM}${dd}${HH}${mm}${ss}-${topic}${FILE_EXT}`

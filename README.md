@@ -5,7 +5,7 @@
 ## 功能特性
 
 - ✨ 自动捕获聊天对话中的用户提示词
-- 📁 有组织的文件存储：`.agent/prompts/yyyy/MM/dd/` 目录结构
+- 📁 有组织的文件存储：`.prompts/yyyy/MM/dd/` 目录结构
 - 🔗 同一 session 的消息自动合并到同一个文件
 - 📝 丰富的元数据：包含会话 ID、日期时间戳和提示词主题
 - 🛡️ 安全的文件名处理：清理文件名以防止文件系统错误
@@ -34,21 +34,14 @@ bun add -g opencode-prompt-recorder
 1. 插件监听 OpenCode 事件（`message.updated`、`message.part.updated`、`session.created`、`session.updated`）
 2. 每次用户消息时，提取提示词文本和会话 ID
 3. 同一 session 的消息合并到同一个文件，按日期组织存储
-4. task 工具创建的子 agent 会话自动存入 `task/` 子目录，与主会话隔离
-5. 文件首行记录 SessionID，每条消息带有时间戳
+4. 文件首行记录 SessionID，每条消息带有时间戳
 
 ## 文件结构
 
 插件创建有组织的目录结构：
 
 ```
-.agent/
-└── prompts/
-    ├── task/
-    │   └── 2026/
-    │       └── 06/
-    │           └── 05/
-    │               └── 260605100300-子任务分析.txt
+.prompts/
     └── 2026/
         └── 06/
             └── 05/
@@ -85,7 +78,7 @@ bun add -g opencode-prompt-recorder
 
 无需额外配置。插件将自动：
 
-- 保存到项目根目录的 `.agent/prompts/` 目录
+- 保存到项目根目录的 `.prompts/` 目录
 - 使用当前工作目录作为基础路径
 - 根据需要创建目录
 
@@ -118,7 +111,7 @@ bun add -g opencode-prompt-recorder
 
 - 确保插件已列入 `opencode.json` 配置
 - 检查项目目录的写入权限
-- 验证 `.agent/prompts/` 目录正在创建
+- 验证 `.prompts/` 目录正在创建
 
 ### 文件名包含特殊字符
 
