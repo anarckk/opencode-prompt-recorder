@@ -50,14 +50,14 @@
 <main class="main">
 
   <h1>opencode-prompt-recorder 功能设计</h1>
-  <p class="subtitle">OpenCode 插件 — 自动将用户提示词写入本地文件</p>
+  <p class="subtitle">OpenCode 插件 — 自动将用户提示词和 AI 问答写入本地文件</p>
 
   <section id="overview">
     <h2>一、概述</h2>
-    <p>订阅 OpenCode 事件，当用户发送消息时，自动将提示词保存到 <code>.prompts/yyyy/MM/dd/</code> 目录下的文本文件中。同一会话的多条消息合并到同一个文件。零配置，装即用，不联网，数据仅存本地。</p>
+    <p>订阅 OpenCode 事件，当用户发送消息或 AI 通过 <code>question</code> 工具交互时，自动将内容保存到 <code>.prompts/yyyy/MM/dd/</code> 目录下的文本文件中。同一会话的多条消息合并到同一个文件。零配置，装即用，不联网，数据仅存本地。</p>
 
     <div class="info-box">
-      <strong>项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp; 版本：<code>1.8.3</code> &nbsp;|&nbsp; 许可：MIT
+      <strong>项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp; 版本：<code>1.8.4</code> &nbsp;|&nbsp; 许可：MIT
     </div>
 
     <table>
@@ -65,7 +65,7 @@
       <tr><td>语言</td><td>TypeScript (ES2022)</td></tr>
       <tr><td>运行时</td><td>Node.js / Bun</td></tr>
       <tr><td>依赖</td><td>仅 peer dependency：<code>@opencode-ai/plugin &gt;=0.15.0</code></td></tr>
-      <tr><td>代码规模</td><td>index.ts ~303 行 + updateOps.ts ~183 行，零外部运行时依赖</td></tr>
+      <tr><td>代码规模</td><td>index.ts ~347 行 + updateOps.ts ~183 行，零外部运行时依赖</td></tr>
       <tr><td>构建</td><td>esbuild</td></tr>
     </table>
   </section>
@@ -76,7 +76,7 @@
     <table>
       <tr><th>事件</th><th>触发时机</th><th>做什么</th></tr>
       <tr><td><code>message.updated</code></td><td>消息元数据更新</td><td>提取 <code>messageID → role</code> 映射，存入 Map（仅存 user 角色）</td></tr>
-      <tr><td><code>message.part.updated</code></td><td>消息内容更新</td><td>核心逻辑：过滤角色、去重、跳过 task 子会话、写入或追加文件</td></tr>
+      <tr><td><code>message.part.updated</code></td><td>消息内容更新</td><td>核心逻辑：过滤角色、去重、跳过 task 子会话、记录 question 工具问答、写入或追加文件</td></tr>
       <tr><td><code>session.created</code></td><td>会话创建</td><td>捕获会话标题存入 <code>sessionTitleMap</code>；若对应文件已创建则重命名以匹配标题</td></tr>
       <tr><td><code>session.updated</code></td><td>会话标题变更</td><td>捕获标题变更；若文件已存在则重命名；若文件未创建则存入 <code>pendingRenames</code> 待文件创建后应用</td></tr>
     </table>
@@ -87,6 +87,7 @@
     <ul>
       <li><strong>目录结构</strong>：<code>.prompts/yyyy/MM/dd/</code>，按首条消息的日期决定目录</li>
       <li><strong>Task 子会话</strong>：子 agent 会话的提示词直接丢弃，不记录</li>
+      <li><strong>Question 工具</strong>：AI 通过 <code>question</code> 工具提问时，提问内容和用户回答一并记录，格式为 <code>[Question Tool]</code> 块</li>
       <li><strong>写入方式</strong>：同一会话首条消息创建文件（writeFile），后续消息追加（appendFile）</li>
       <li><strong>缓存</strong>：<code>sessionFileCache</code> 缓存文件路径，避免重复目录计算。进程重启后 cache 为空，通过 <code>findSessionFile()</code> 按 sessionID 扫描已有文件复用</li>
       <li><strong>跨天</strong>：每条消息时间戳包含日期（<code>yyyy-MM-dd HH:mm:ss</code>），目录以首条消息日期为准</li>
@@ -156,6 +157,9 @@ sequenceDiagram
     OC->>PR: message.part.updated (type=tool, tool=task)
     Note over PR: track child sessionId
 
+    OC->>PR: message.part.updated (type=tool, tool=question, completed)
+    Note over PR: format Q&A → append to file
+
     OC->>PR: session.created
     Note over PR: capture session title
 
@@ -171,6 +175,8 @@ flowchart TD
     E[message.part.updated] --> T{part.type?}
     T -->|tool + task| M[提取 metadata.sessionId]
     M --> S[加入 taskSessionIds Set]
+    T -->|tool + question + completed| Q[格式化 Q&A]
+    Q --> W2[写入或追加文件]
     T -->|text| F{role === user?}
     F -->|No| Skip[跳过]
     F -->|Yes| Sys{synthetic/ignored?}

@@ -1,10 +1,11 @@
 # opencode-prompt-recorder
 
-一个用于记录用户提示词的 OpenCode 插件。自动将用户消息保存到本地文件系统，并按目录结构组织。
+一个用于记录用户提示词和 AI 问答的 OpenCode 插件。自动将用户消息和 AI 的问题工具交互保存到本地文件系统，并按目录结构组织。
 
 ## 功能特性
 
 - ✨ 自动捕获聊天对话中的用户提示词
+- ✨ 记录 AI 的 `question` 工具交互（提问和用户回答）
 - 📁 有组织的文件存储：`.prompts/yyyy/MM/dd/` 目录结构
 - 🔗 同一 session 的消息自动合并到同一个文件
 - 📝 丰富的元数据：包含会话 ID、日期时间戳和提示词主题
@@ -33,8 +34,30 @@ bun add -g opencode-prompt-recorder
 
 1. 插件监听 OpenCode 事件（`message.updated`、`message.part.updated`、`session.created`、`session.updated`）
 2. 每次用户消息时，提取提示词文本和会话 ID
-3. 同一 session 的消息合并到同一个文件，按日期组织存储
-4. 文件首行记录 SessionID，每条消息带有时间戳
+3. 当 AI 通过 `question` 工具向用户提问时，提问内容和用户回答一并记录
+4. 同一 session 的消息合并到同一个文件，按日期组织存储
+5. 文件首行记录 SessionID，每条消息带有时间戳
+
+### 文件内容格式
+
+记录内容分为两类：
+
+**用户消息：**
+```markdown
+============ 2026-06-05 10:05:30 ============
+
+什么是 AI？
+```
+
+**Question 工具问答：**
+```markdown
+============ 2026-06-05 10:50:15 ============
+
+[Question Tool]
+Q: 你更喜欢哪个选项？
+  Options: A, B, C
+A: A
+```
 
 ## 文件结构
 
@@ -59,20 +82,6 @@ bun add -g opencode-prompt-recorder
     - `session.updated` 事件触发时立即重命名
     - 若事件先于文件创建到达（竞态），暂存待处理，文件创建后立即应用
     - 创建后 5 秒自动通过 SDK 查询最新标题，兜底修正
-
-同一 session 的消息合并到同一个文件，文件内容格式：
-
-```markdown
-============ SessionID: ses_xxxxx ============
-
-============ 2026-06-05 10:05:30 ============
-
-什么是 AI？
-
-============ 2026-06-05 10:50:15 ============
-
-如何编写 hello world 程序？
-```
 
 ## 配置
 
