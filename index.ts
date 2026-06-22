@@ -86,7 +86,6 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
   const ASSISTANT_FLUSH_FALLBACK_MS = 60000
   const assistantMetaMap = new Map<string, { modelID: string; providerID: string; tokens: any; time: any; cost: number }>()
   const assistantTextBuffer = new Map<string, { text: string; timer: ReturnType<typeof setTimeout>; time: number }>()
-  const assistantSessionAccum = new Map<string, { text: string; time: number }>()
 
   function pruneCache() {
     if (sessionFileCache.size < CACHE_MAX_SIZE) return
@@ -121,11 +120,6 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     if (pendingRenames.size > 0) {
       for (const [k, v] of pendingRenames) {
         if (now - v.time > PENDING_RENAME_MAX_AGE) pendingRenames.delete(k)
-      }
-    }
-    if (assistantSessionAccum.size > MAX_MAP_SIZE) {
-      for (const [k, v] of assistantSessionAccum) {
-        if (now - v.time > MAX_MAP_AGE) assistantSessionAccum.delete(k)
       }
     }
   }
@@ -237,22 +231,10 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
 
         const dedupeKey = `assistant:${id}`
         if (!processedMessageKeys.has(dedupeKey)) {
-          const buf = assistantTextBuffer.get(id)
-          assistantTextBuffer.delete(id)
-          if (buf) {
-            const accum = assistantSessionAccum.get(sessionID)
-            assistantSessionAccum.set(sessionID, { text: accum ? accum.text + "\n\n" + buf.text : buf.text, time: Date.now() })
-          }
-
           if (info.finish === "stop") {
-            const accum = assistantSessionAccum.get(sessionID)
-            assistantSessionAccum.delete(sessionID)
-            if (accum) {
-              const meta = assistantMetaMap.get(id)
-              await flushAccumulated(accum.text, id, sessionID, meta)
-            }
+            await flushAssistantResponse(id, sessionID)
           }
-
+          assistantTextBuffer.delete(id)
           processedMessageKeys.set(dedupeKey, Date.now())
           pruneMaps()
         }
@@ -424,38 +406,6 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
 
     await appendToSessionFile(sessionID, content, header)
     return true
-  }
-
-  async function flushAccumulated(text: string, lastID: string, sessionID: string, meta: any) {
-    const now = new Date()
-    const { yyyy, MM, dd, HH, mm, ss } = formatDate(now)
-
-    let header = `<<<<<<<<<<<< ${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`
-
-    if (meta) {
-      const modelStr = meta.modelID ? `${meta.providerID}/${meta.modelID}` : ''
-      if (modelStr) header += ` | Model: ${modelStr}`
-
-      if (meta.tokens) {
-        header += ` | In: ${meta.tokens.input} | Out: ${meta.tokens.output}`
-        if (meta.tokens.reasoning) {
-          header += ` | R: ${meta.tokens.reasoning}`
-        }
-      }
-
-      if (meta.time?.completed && meta.time?.created) {
-        const durationMs = meta.time.completed - meta.time.created
-        if (meta.tokens?.output && durationMs > 0) {
-          const tps = (meta.tokens.output / (durationMs / 1000)).toFixed(1)
-          header += ` | TPS: ${tps}`
-        }
-      }
-    }
-
-    header += ` <<<<<<<<<<<<`
-
-    await debugLog(directory, `[prompt-recorder] recorded accumulated assistant response: sessionID=${sessionID}, textLength=${text.length}`)
-    await appendToSessionFile(sessionID, text, header)
   }
 
   async function handleSessionCreated(event: { properties: any }) {

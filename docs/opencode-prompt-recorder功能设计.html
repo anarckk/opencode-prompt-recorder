@@ -75,7 +75,7 @@
     <p>注册一个统一的 <code>event</code> 处理器，监听四种事件：</p>
     <table>
       <tr><th>事件</th><th>触发时机</th><th>做什么</th></tr>
-      <tr><td><code>message.updated</code></td><td>消息元数据更新</td><td>提取 <code>messageID → role</code> 映射（user/assistant 角色）；缓存 assistant 消息元数据（modelID、providerID、tokens、time、cost）；收到 <code>time.completed</code> 时：若 <code>finish === "tool-calls"</code> 将缓冲文本移入会话累计器等待后续合并；若 <code>finish === "stop"</code> 则将累计器文本 + 本次文本合并写入文件（一次用户消息对应一条 AI 记录）</td></tr>
+      <tr><td><code>message.updated</code></td><td>消息元数据更新</td><td>提取 <code>messageID → role</code> 映射（user/assistant 角色）；缓存 assistant 消息元数据（modelID、providerID、tokens、time、cost）；收到 <code>time.completed</code> 时：若 <code>finish === "tool-calls"</code> 跳过（中间消息不记录）；若 <code>finish === "stop"</code> 将缓冲文本 + 元数据写入文件（仅最终响应）</td></tr>
       <tr><td><code>message.part.updated</code></td><td>消息内容更新</td><td>角色解析：<code>messageRoleMap</code>（由 message.updated 缓存）→ event.properties.info 兜底 → 启发式（messageID 不在 roleMap 则判 assistant）<br>user 文本：过滤去重、跳过 task 子会话、写入文件<br>question 工具：记录为 <code>[Question Tool]</code> 块<br>assistant 流式文本：缓冲至 <code>assistantTextBuffer</code>，由 <code>message.updated</code> 的 finish 字段决定写入时机</td></tr>
       <tr><td><code>session.created</code></td><td>会话创建</td><td>捕获会话标题存入 <code>sessionTitleMap</code>；若对应文件已创建则重命名以匹配标题</td></tr>
       <tr><td><code>session.updated</code></td><td>会话标题变更</td><td>捕获标题变更；若文件已存在则重命名；若文件未创建则存入 <code>pendingRenames</code> 待文件创建后应用</td></tr>
@@ -87,7 +87,7 @@
     <ul>
       <li><strong>目录结构</strong>：<code>.prompts/yyyy/MM/dd/</code>，按首条消息的日期决定目录</li>
       <li><strong>Task 子会话</strong>：子 agent 会话的提示词直接丢弃，不记录</li>
-      <li><strong>AI 响应</strong>：记录 AI 的完整回答文本，每次工具调用循环的文本会累计合并，在最终回复（<code>finish === "stop"</code>）时一次性写入，附带模型、Token 消耗、TPS 元数据头。一次用户消息对应一条 AI 记录</li>
+      <li><strong>AI 响应</strong>：仅记录 AI 最终回复（<code>finish === "stop"</code>）的文本，附带模型、Token 消耗、TPS 元数据头。中间工具调用循环的文本不记录</li>
       <li><strong>Question 工具</strong>：AI 通过 <code>question</code> 工具提问时，提问内容和用户回答一并记录，格式为 <code>[Question Tool]</code> 块</li>
       <li><strong>写入方式</strong>：同一会话首条消息创建文件（writeFile），后续消息追加（appendFile）</li>
       <li><strong>缓存</strong>：<code>sessionFileCache</code> 缓存文件路径，避免重复目录计算。进程重启后 cache 为空，通过 <code>findSessionFile()</code> 按 sessionID 扫描已有文件复用</li>
@@ -183,11 +183,9 @@ sequenceDiagram
 
     OC->>PR: message.updated (time.completed + finish)
     alt finish === "tool-calls"
-        Note over PR: move text to session accumulator
-        Note over PR: wait for next step
+        Note over PR: skip (intermediate, not recorded)
     else finish === "stop"
-        Note over PR: flush accumulator + current text
-        Note over PR: appendFile(model/TPS header)
+        Note over PR: flush buffered text with metadata
     end
 
     OC->>PR: message.part.updated (type=tool, tool=task)
@@ -229,9 +227,8 @@ flowchart TD
     Task2 -->|Yes| Skip
     Task2 -->|No| Buf[缓冲文本]
     Buf -.->|message.updated<br/>time.completed| M{finish?}
-    M -->|tool-calls| Acc[移入会话累计器<br/>等待后续合并]
-    Acc -.->|下一轮循环| Buf
-    M -->|stop| Flush[累计 + 本次文本<br/>合并元数据写入文件]
+    M -->|tool-calls| Skip
+    M -->|stop| Flush[合并元数据写入文件]
       </pre>
       <div class="caption">图 2：消息处理决策流</div>
     </div>
