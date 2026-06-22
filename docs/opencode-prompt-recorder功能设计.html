@@ -75,8 +75,8 @@
     <p>注册一个统一的 <code>event</code> 处理器，监听四种事件：</p>
     <table>
       <tr><th>事件</th><th>触发时机</th><th>做什么</th></tr>
-      <tr><td><code>message.updated</code></td><td>消息元数据更新</td><td>提取 <code>messageID → role</code> 映射（user 角色）；缓存 assistant 消息元数据（modelID、providerID、tokens、time、cost）</td></tr>
-      <tr><td><code>message.part.updated</code></td><td>消息内容更新</td><td>核心逻辑：过滤角色、去重、跳过 task 子会话、记录 question 工具问答、记录 AI 响应（含模型/Token/TPS 元数据）、写入或追加文件</td></tr>
+      <tr><td><code>message.updated</code></td><td>消息元数据更新</td><td>提取 <code>messageID → role</code> 映射（user/assistant 角色）；缓存 assistant 消息元数据（modelID、providerID、tokens、time、cost）</td></tr>
+      <tr><td><code>message.part.updated</code></td><td>消息内容更新</td><td>角色解析：<code>messageRoleMap</code>（由 message.updated 缓存）→ event.properties.info 兜底 → 启发式（messageID 不在 roleMap 则判 assistant）<br>user 文本：过滤去重、跳过 task 子会话、写入文件<br>question 工具：记录为 <code>[Question Tool]</code> 块<br>assistant 流式文本：3 秒防抖后写入（含模型/Token/TPS 元数据头）</td></tr>
       <tr><td><code>session.created</code></td><td>会话创建</td><td>捕获会话标题存入 <code>sessionTitleMap</code>；若对应文件已创建则重命名以匹配标题</td></tr>
       <tr><td><code>session.updated</code></td><td>会话标题变更</td><td>捕获标题变更；若文件已存在则重命名；若文件未创建则存入 <code>pendingRenames</code> 待文件创建后应用</td></tr>
     </table>
@@ -128,7 +128,7 @@ A: A</code></pre>
       <tr><th>场景</th><th>处理</th></tr>
       <tr><td>目录创建 / 文件写入失败</td><td>异常传播到事件循环，OpenCode 自动重试</td></tr>
       <tr><td>debug log 写入失败</td><td><code>console.error</code> 报告，不抛异常</td></tr>
-      <tr><td>事件 payload 缺少字段</td><td>多层 fallback 逐级尝试，全部失败则跳过</td></tr>
+      <tr><td>事件 payload 缺少字段</td><td>多层 fallback 逐级尝试（messageRoleMap → event.properties.info → 启发式），全部失败则跳过</td></tr>
       <tr><td>synthetic / ignored 部件误入</td><td>主动跳过</td></tr>
       <tr><td>文件重命名失败</td><td><code>console.error</code> 记录错误，不阻塞后续流程</td></tr>
     </table>

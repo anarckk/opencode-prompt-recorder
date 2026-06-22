@@ -287,9 +287,9 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     if (!sessionID) return
 
     let role = messageRoleMap.get(messageID)?.role
-    if (!role) role = part.message?.role
     if (!role) role = (event.properties as any).info?.role
     if (!role) role = (event.properties as any).info?.message?.role
+    if (!role && messageID && !messageRoleMap.has(messageID)) role = "assistant"
 
     if (role === "user") {
       if (isSystemInjected(text)) {
