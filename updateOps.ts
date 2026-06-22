@@ -91,7 +91,7 @@ export async function updateRemoveDir(packageDir: string, name: string) {
   const spec = wrapperSpec(wrapperDir, name) ?? wrapperPkg?.dependencies?.[name]
   if (!spec || !isAutoUpdatableSpec(spec)) return undefined
 
-  return wrapperDir
+  return packageDir
 }
 
 function wrapperSpec(wrapperDir: string, name: string) {
