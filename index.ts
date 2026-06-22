@@ -211,7 +211,7 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     const info = event.properties.info as any
     const id = info?.id
     const role = info?.role || info?.message?.role
-    if (id && role === "user") {
+    if (id && (role === "user" || role === "assistant")) {
       messageRoleMap.set(id, { role, time: Date.now() })
     }
     if (id && role === "assistant" && info.tokens) {
