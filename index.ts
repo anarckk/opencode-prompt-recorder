@@ -291,8 +291,6 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     if (!role) role = (event.properties as any).info?.message?.role
     if (!role && messageID && !messageRoleMap.has(messageID)) role = "assistant"
 
-    await debugLog(directory, `role="${role}" messageID="${messageID}" hasRoleMap=${messageRoleMap.has(messageID)} sessionID="${sessionID}" textLen=${text.length}`)
-
     if (role === "user") {
       if (isSystemInjected(text)) {
         await debugLog(directory, `[prompt-recorder] filtered system-injected: sessionID=${sessionID}`)
@@ -333,10 +331,10 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     }
 
     const timer = setTimeout(async () => {
+      await flushAssistantResponse(messageID, sessionID)
       assistantTextBuffer.delete(messageID)
       processedMessageKeys.set(dedupeKey, Date.now())
       pruneMaps()
-      await flushAssistantResponse(messageID, sessionID)
     }, ASSISTANT_FLUSH_DELAY)
 
     assistantTextBuffer.set(messageID, { text, timer })
