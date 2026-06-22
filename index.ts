@@ -82,6 +82,9 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
   const sessionFileCache = new Map<string, { filepath: string; time: number }>()
   const pendingRenames = new Map<string, { title: string; time: number }>()
   const pendingSdkTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const ASSISTANT_FLUSH_DELAY = 3000
+  const assistantMetaMap = new Map<string, { modelID: string; providerID: string; tokens: any; time: any; cost: number }>()
+  const assistantTextBuffer = new Map<string, { text: string; timer: ReturnType<typeof setTimeout> }>()
 
   function pruneCache() {
     if (sessionFileCache.size < CACHE_MAX_SIZE) return
@@ -142,11 +145,11 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     }
   }
 
-  async function appendToSessionFile(sessionID: string, content: string) {
+  async function appendToSessionFile(sessionID: string, content: string, customHeader?: string) {
     const now = new Date()
     const { yyyy, MM, dd, HH, mm, ss } = formatDate(now)
     const yy = yyyy.slice(-2)
-    const timeTitle = `============ ${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss} ============`
+    const timeTitle = customHeader ?? `============ ${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss} ============`
     const entry = `\n\n${timeTitle}\n\n${content}`
 
     const cached = sessionFileCache.get(sessionID)
@@ -211,6 +214,16 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     if (id && role === "user") {
       messageRoleMap.set(id, { role, time: Date.now() })
     }
+    if (id && role === "assistant" && info.tokens) {
+      const existing = assistantMetaMap.get(id)
+      assistantMetaMap.set(id, {
+        modelID: info.modelID ?? existing?.modelID,
+        providerID: info.providerID ?? existing?.providerID,
+        tokens: info.tokens ?? existing?.tokens,
+        time: info.time ?? existing?.time,
+        cost: info.cost ?? existing?.cost,
+      })
+    }
   }
 
   async function handleMessagePartUpdated(event: { type: string; properties: any }) {
@@ -271,31 +284,98 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     const messageID = part.messageID
     const text = part.text
 
+    if (!sessionID) return
+
     let role = messageRoleMap.get(messageID)?.role
     if (!role) role = part.message?.role
     if (!role) role = (event.properties as any).info?.role
     if (!role) role = (event.properties as any).info?.message?.role
 
-    if (role !== "user" || !text || !sessionID) return
+    if (role === "user") {
+      if (isSystemInjected(text)) {
+        await debugLog(directory, `[prompt-recorder] filtered system-injected: sessionID=${sessionID}`)
+        return
+      }
 
-    if (isSystemInjected(text)) {
-      await debugLog(directory, `[prompt-recorder] filtered system-injected: sessionID=${sessionID}`)
-      return
+      const dedupeKey = messageID ? `${messageID}:${text}` : `${sessionID}:${text}`
+      if (processedMessageKeys.has(dedupeKey)) return
+      processedMessageKeys.set(dedupeKey, Date.now())
+      pruneMaps()
+
+      if (taskSessionIds.has(sessionID)) {
+        await debugLog(directory, `[prompt-recorder] skipped task session: ${sessionID}`)
+        return
+      }
+
+      await debugLog(directory, `[prompt-recorder] event=${event.type}, role=${role}, sessionID=${sessionID}, textLength=${text.length}, textPreview=${text.substring(0, 50)}`)
+
+      await appendToSessionFile(sessionID, text)
+    } else if (role === "assistant") {
+      if (taskSessionIds.has(sessionID)) {
+        await debugLog(directory, `[prompt-recorder] skipped task session: ${sessionID}`)
+        return
+      }
+
+      await handleAssistantTextPart(messageID, sessionID, text)
     }
+  }
 
-    const dedupeKey = messageID ? `${messageID}:${text}` : `${sessionID}:${text}`
+  async function handleAssistantTextPart(messageID: string, sessionID: string, text: string) {
+    const dedupeKey = `assistant:${messageID}`
     if (processedMessageKeys.has(dedupeKey)) return
-    processedMessageKeys.set(dedupeKey, Date.now())
-    pruneMaps()
 
-    if (taskSessionIds.has(sessionID)) {
-      await debugLog(directory, `[prompt-recorder] skipped task session: ${sessionID}`)
-      return
+    const existing = assistantTextBuffer.get(messageID)
+    if (existing) {
+      if (existing.text === text) return
+      clearTimeout(existing.timer)
     }
 
-    await debugLog(directory, `[prompt-recorder] event=${event.type}, role=${role}, sessionID=${sessionID}, textLength=${text.length}, textPreview=${text.substring(0, 50)}`)
+    const timer = setTimeout(async () => {
+      assistantTextBuffer.delete(messageID)
+      processedMessageKeys.set(dedupeKey, Date.now())
+      pruneMaps()
+      await flushAssistantResponse(messageID, sessionID)
+    }, ASSISTANT_FLUSH_DELAY)
 
-    await appendToSessionFile(sessionID, text)
+    assistantTextBuffer.set(messageID, { text, timer })
+  }
+
+  async function flushAssistantResponse(messageID: string, sessionID: string) {
+    const buf = assistantTextBuffer.get(messageID)
+    if (!buf) return
+
+    const meta = assistantMetaMap.get(messageID)
+
+    const now = new Date()
+    const { yyyy, MM, dd, HH, mm, ss } = formatDate(now)
+
+    let header = `============ ${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`
+
+    if (meta) {
+      const modelStr = meta.modelID ? `${meta.providerID}/${meta.modelID}` : ''
+      if (modelStr) header += ` | Model: ${modelStr}`
+
+      if (meta.tokens) {
+        header += ` | In: ${meta.tokens.input} | Out: ${meta.tokens.output}`
+        if (meta.tokens.reasoning) {
+          header += ` | R: ${meta.tokens.reasoning}`
+        }
+      }
+
+      if (meta.time?.completed && meta.time?.created) {
+        const durationMs = meta.time.completed - meta.time.created
+        if (meta.tokens?.output && durationMs > 0) {
+          const tps = (meta.tokens.output / (durationMs / 1000)).toFixed(1)
+          header += ` | TPS: ${tps}`
+        }
+      }
+    }
+
+    header += ` ============`
+
+    await debugLog(directory, `[prompt-recorder] recorded assistant response: messageID=${messageID}, sessionID=${sessionID}, textLength=${buf.text.length}`)
+
+    await appendToSessionFile(sessionID, buf.text, header)
   }
 
   async function handleSessionCreated(event: { properties: any }) {

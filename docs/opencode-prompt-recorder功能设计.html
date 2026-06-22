@@ -54,10 +54,10 @@
 
   <section id="overview">
     <h2>一、概述</h2>
-    <p>订阅 OpenCode 事件，当用户发送消息或 AI 通过 <code>question</code> 工具交互时，自动将内容保存到 <code>.prompts/yyyy/MM/dd/</code> 目录下的文本文件中。同一会话的多条消息合并到同一个文件。零配置，装即用，不联网，数据仅存本地。</p>
+    <p>订阅 OpenCode 事件，自动记录用户提示词、AI 响应（含模型、Token、TPS 元数据）以及 question 工具交互到 <code>.prompts/yyyy/MM/dd/</code> 目录下的文本文件中。同一会话的多条消息合并到同一个文件。零配置，装即用，不联网，数据仅存本地。</p>
 
     <div class="info-box">
-      <strong>项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp; 版本：<code>1.8.4</code> &nbsp;|&nbsp; 许可：MIT
+      <strong>项目地址：</strong> <code>https://github.com/anarckk/opencode-prompt-recorder</code> &nbsp;|&nbsp; 版本：<code>1.10.0</code> &nbsp;|&nbsp; 许可：MIT
     </div>
 
     <table>
@@ -65,7 +65,7 @@
       <tr><td>语言</td><td>TypeScript (ES2022)</td></tr>
       <tr><td>运行时</td><td>Node.js / Bun</td></tr>
       <tr><td>依赖</td><td>仅 peer dependency：<code>@opencode-ai/plugin &gt;=0.15.0</code></td></tr>
-      <tr><td>代码规模</td><td>index.ts ~347 行 + updateOps.ts ~183 行，零外部运行时依赖</td></tr>
+      <tr><td>代码规模</td><td>index.ts ~428 行 + updateOps.ts ~183 行，零外部运行时依赖</td></tr>
       <tr><td>构建</td><td>esbuild</td></tr>
     </table>
   </section>
@@ -75,8 +75,8 @@
     <p>注册一个统一的 <code>event</code> 处理器，监听四种事件：</p>
     <table>
       <tr><th>事件</th><th>触发时机</th><th>做什么</th></tr>
-      <tr><td><code>message.updated</code></td><td>消息元数据更新</td><td>提取 <code>messageID → role</code> 映射，存入 Map（仅存 user 角色）</td></tr>
-      <tr><td><code>message.part.updated</code></td><td>消息内容更新</td><td>核心逻辑：过滤角色、去重、跳过 task 子会话、记录 question 工具问答、写入或追加文件</td></tr>
+      <tr><td><code>message.updated</code></td><td>消息元数据更新</td><td>提取 <code>messageID → role</code> 映射（user 角色）；缓存 assistant 消息元数据（modelID、providerID、tokens、time、cost）</td></tr>
+      <tr><td><code>message.part.updated</code></td><td>消息内容更新</td><td>核心逻辑：过滤角色、去重、跳过 task 子会话、记录 question 工具问答、记录 AI 响应（含模型/Token/TPS 元数据）、写入或追加文件</td></tr>
       <tr><td><code>session.created</code></td><td>会话创建</td><td>捕获会话标题存入 <code>sessionTitleMap</code>；若对应文件已创建则重命名以匹配标题</td></tr>
       <tr><td><code>session.updated</code></td><td>会话标题变更</td><td>捕获标题变更；若文件已存在则重命名；若文件未创建则存入 <code>pendingRenames</code> 待文件创建后应用</td></tr>
     </table>
@@ -87,11 +87,29 @@
     <ul>
       <li><strong>目录结构</strong>：<code>.prompts/yyyy/MM/dd/</code>，按首条消息的日期决定目录</li>
       <li><strong>Task 子会话</strong>：子 agent 会话的提示词直接丢弃，不记录</li>
+      <li><strong>AI 响应</strong>：记录 AI 的完整回答文本，每条响应附带模型、Token 消耗、TPS 元数据头</li>
       <li><strong>Question 工具</strong>：AI 通过 <code>question</code> 工具提问时，提问内容和用户回答一并记录，格式为 <code>[Question Tool]</code> 块</li>
       <li><strong>写入方式</strong>：同一会话首条消息创建文件（writeFile），后续消息追加（appendFile）</li>
       <li><strong>缓存</strong>：<code>sessionFileCache</code> 缓存文件路径，避免重复目录计算。进程重启后 cache 为空，通过 <code>findSessionFile()</code> 按 sessionID 扫描已有文件复用</li>
       <li><strong>跨天</strong>：每条消息时间戳包含日期（<code>yyyy-MM-dd HH:mm:ss</code>），目录以首条消息日期为准</li>
     </ol>
+    <h3>文件内容格式</h3>
+    <p>文件内包含三种类型的条目，以 <code>============</code> 分隔：</p>
+    <p><strong>用户消息：</strong></p>
+    <pre><code>============ 2026-06-05 10:05:30 ============
+
+什么是 AI？</code></pre>
+    <p><strong>AI 响应（含模型 / Token / TPS 元数据）：</strong></p>
+    <pre><code>============ 2026-06-05 10:05:35 | Model: openai/gpt-4o | In: 45 | Out: 128 | R: 10 | TPS: 25.6 ============
+
+人工智能是模拟人类智能的技术……</code></pre>
+    <p><strong>Question 工具交互：</strong></p>
+    <pre><code>============ 2026-06-05 10:50:15 ============
+
+[Question Tool]
+Q: 你更喜欢哪个选项？
+  Options: A, B, C
+A: A</code></pre>
   </section>
 
   <section id="naming">
@@ -125,6 +143,7 @@
       <tr><td>纯空白 / 特殊字符文件名</td><td>回退为 <code>untitled</code></td></tr>
       <tr><td>超长标题（&gt;40 字符）</td><td>截断至 40 字符；标题为空时回退到首条消息文本</td></tr>
       <tr><td>系统注入标签（海马体等）</td><td><code>isSystemInjected()</code> 检测并跳过</td></tr>
+      <tr><td>AI 响应元数据缺失（模型/Token/时间）</td><td>仅记录已有字段，缺失部分跳过</td></tr>
       <tr><td>并发消息事件</td><td><code>processedMessageKeys</code>（messageID + 文本）去重，超过 2000 条或 24h 后自动裁剪</td></tr>
       <tr><td>跨天会话</td><td>按首条消息日期决定目录</td></tr>
       <tr><td>插件进程重启</td><td>内存缓存清空，<code>findSessionFile()</code> 扫描已有文件复用</td></tr>
@@ -154,6 +173,13 @@ sequenceDiagram
         PR->>FS: appendFile(time header + text)
     end
 
+    OC->>PR: message.updated (role=assistant)
+    Note over PR: cache model/tokens/time metadata
+
+    OC->>PR: message.part.updated (type=text, role=assistant)
+    Note over PR: buffer text with 3s debounce
+    Note over PR: flush → appendFile(model/TPS header)
+
     OC->>PR: message.part.updated (type=tool, tool=task)
     Note over PR: track child sessionId
 
@@ -177,19 +203,24 @@ flowchart TD
     M --> S[加入 taskSessionIds Set]
     T -->|tool + question + completed| Q[格式化 Q&A]
     Q --> W2[写入或追加文件]
-    T -->|text| F{role === user?}
-    F -->|No| Skip[跳过]
-    F -->|Yes| Sys{synthetic/ignored?}
-    Sys -->|Yes| Skip
+    T -->|text| F{role?}
+    F -->|user| Sys{synthetic/ignored?}
+    Sys -->|Yes| Skip[跳过]
     Sys -->|No| Inj{isSystemInjected?}
     Inj -->|Yes| Skip
-    Inj -->|No| D{已去重?}
-    D -->|Yes| Skip
-    D -->|No| Task{是 task 子会话?}
+    Inj -->|No| Du{已去重?}
+    Du -->|Yes| Skip
+    Du -->|No| Task{是 task 子会话?}
     Task -->|Yes| Skip
     Task -->|No| C{有缓存文件?}
     C -->|No| N[创建新文件]
     C -->|Yes| A[追加到现有文件]
+    F -->|assistant| Task2{是 task 子会话?}
+    Task2 -->|Yes| Skip
+    Task2 -->|No| Dedup{assistant 已写入?}
+    Dedup -->|Yes| Skip
+    Dedup -->|No| Buf[缓冲文本 3s 防抖]
+    Buf -->|timer fire| Flush[合并元数据写入文件]
       </pre>
       <div class="caption">图 2：消息处理决策流</div>
     </div>
