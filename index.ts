@@ -291,6 +291,8 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     if (!role) role = (event.properties as any).info?.message?.role
     if (!role && messageID && !messageRoleMap.has(messageID)) role = "assistant"
 
+    await debugLog(directory, `role="${role}" messageID="${messageID}" hasRoleMap=${messageRoleMap.has(messageID)} sessionID="${sessionID}" textLen=${text.length}`)
+
     if (role === "user") {
       if (isSystemInjected(text)) {
         await debugLog(directory, `[prompt-recorder] filtered system-injected: sessionID=${sessionID}`)
