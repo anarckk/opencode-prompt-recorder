@@ -53,7 +53,7 @@ bun add -g opencode-prompt-recorder
 
 **AI 响应：**
 ```markdown
-============ 2026-06-05 10:05:35 | Model: openai/gpt-4o | In: 45 | Out: 128 | R: 10 | TPS: 25.6 ============
+<<<<<<<<<<<< 2026-06-05 10:05:35 | Model: openai/gpt-4o | In: 45 | Out: 128 | R: 10 | TPS: 25.6 <<<<<<<<<<<<
 
 AI 认为人工智能是一种模拟人类智能的技术……
 ```

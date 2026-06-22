@@ -83,8 +83,9 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
   const pendingRenames = new Map<string, { title: string; time: number }>()
   const pendingSdkTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const ASSISTANT_FLUSH_DELAY = 3000
+  const ASSISTANT_FLUSH_FALLBACK_MS = 60000
   const assistantMetaMap = new Map<string, { modelID: string; providerID: string; tokens: any; time: any; cost: number }>()
-  const assistantTextBuffer = new Map<string, { text: string; timer: ReturnType<typeof setTimeout> }>()
+  const assistantTextBuffer = new Map<string, { text: string; timer: ReturnType<typeof setTimeout>; time: number }>()
 
   function pruneCache() {
     if (sessionFileCache.size < CACHE_MAX_SIZE) return
@@ -209,6 +210,7 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
 
   async function handleMessageUpdated(event: { properties: any }) {
     const info = event.properties.info as any
+    const sessionID = event.properties.sessionID as string
     const id = info?.id
     const role = info?.role || info?.message?.role
     if (id && (role === "user" || role === "assistant")) {
@@ -223,6 +225,19 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
         time: info.time ?? existing?.time,
         cost: info.cost ?? existing?.cost,
       })
+      if (info.time?.completed) {
+        const bufEntry = assistantTextBuffer.get(id)
+        if (bufEntry) clearTimeout(bufEntry.timer)
+        const dedupeKey = `assistant:${id}`
+        if (!processedMessageKeys.has(dedupeKey)) {
+          const flushed = await flushAssistantResponse(id, sessionID)
+          assistantTextBuffer.delete(id)
+          if (flushed) {
+            processedMessageKeys.set(dedupeKey, Date.now())
+            pruneMaps()
+          }
+        }
+      }
     }
   }
 
@@ -320,6 +335,24 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
     }
   }
 
+  async function onAssistantTimerFired(messageID: string, sessionID: string, dedupeKey: string) {
+    const meta = assistantMetaMap.get(messageID)
+    const buf = assistantTextBuffer.get(messageID)
+    if (!buf) return
+
+    if (meta?.time?.completed || Date.now() - buf.time > ASSISTANT_FLUSH_FALLBACK_MS) {
+      const flushed = await flushAssistantResponse(messageID, sessionID)
+      assistantTextBuffer.delete(messageID)
+      if (flushed) {
+        processedMessageKeys.set(dedupeKey, Date.now())
+        pruneMaps()
+      }
+    } else {
+      const timer = setTimeout(() => onAssistantTimerFired(messageID, sessionID, dedupeKey), ASSISTANT_FLUSH_DELAY)
+      assistantTextBuffer.set(messageID, { ...buf, timer })
+    }
+  }
+
   async function handleAssistantTextPart(messageID: string, sessionID: string, text: string) {
     const dedupeKey = `assistant:${messageID}`
     if (processedMessageKeys.has(dedupeKey)) return
@@ -330,26 +363,21 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
       clearTimeout(existing.timer)
     }
 
-    const timer = setTimeout(async () => {
-      await flushAssistantResponse(messageID, sessionID)
-      assistantTextBuffer.delete(messageID)
-      processedMessageKeys.set(dedupeKey, Date.now())
-      pruneMaps()
-    }, ASSISTANT_FLUSH_DELAY)
+    const timer = setTimeout(() => onAssistantTimerFired(messageID, sessionID, dedupeKey), ASSISTANT_FLUSH_DELAY)
 
-    assistantTextBuffer.set(messageID, { text, timer })
+    assistantTextBuffer.set(messageID, { text, timer, time: Date.now() })
   }
 
-  async function flushAssistantResponse(messageID: string, sessionID: string) {
+  async function flushAssistantResponse(messageID: string, sessionID: string): Promise<boolean> {
     const buf = assistantTextBuffer.get(messageID)
-    if (!buf) return
+    if (!buf) return false
 
     const meta = assistantMetaMap.get(messageID)
 
     const now = new Date()
     const { yyyy, MM, dd, HH, mm, ss } = formatDate(now)
 
-    let header = `============ ${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`
+    let header = `<<<<<<<<<<<< ${yyyy}-${MM}-${dd} ${HH}:${mm}:${ss}`
 
     if (meta) {
       const modelStr = meta.modelID ? `${meta.providerID}/${meta.modelID}` : ''
@@ -371,11 +399,12 @@ const OpenCodePromptRecorder: Plugin = async (ctx) => {
       }
     }
 
-    header += ` ============`
+    header += ` <<<<<<<<<<<<`
 
     await debugLog(directory, `[prompt-recorder] recorded assistant response: messageID=${messageID}, sessionID=${sessionID}, textLength=${buf.text.length}`)
 
     await appendToSessionFile(sessionID, buf.text, header)
+    return true
   }
 
   async function handleSessionCreated(event: { properties: any }) {

@@ -76,7 +76,7 @@
     <table>
       <tr><th>事件</th><th>触发时机</th><th>做什么</th></tr>
       <tr><td><code>message.updated</code></td><td>消息元数据更新</td><td>提取 <code>messageID → role</code> 映射（user/assistant 角色）；缓存 assistant 消息元数据（modelID、providerID、tokens、time、cost）</td></tr>
-      <tr><td><code>message.part.updated</code></td><td>消息内容更新</td><td>角色解析：<code>messageRoleMap</code>（由 message.updated 缓存）→ event.properties.info 兜底 → 启发式（messageID 不在 roleMap 则判 assistant）<br>user 文本：过滤去重、跳过 task 子会话、写入文件<br>question 工具：记录为 <code>[Question Tool]</code> 块<br>assistant 流式文本：3 秒防抖后写入（含模型/Token/TPS 元数据头）</td></tr>
+      <tr><td><code>message.part.updated</code></td><td>消息内容更新</td><td>角色解析：<code>messageRoleMap</code>（由 message.updated 缓存）→ event.properties.info 兜底 → 启发式（messageID 不在 roleMap 则判 assistant）<br>user 文本：过滤去重、跳过 task 子会话、写入文件<br>question 工具：记录为 <code>[Question Tool]</code> 块<br>assistant 流式文本：缓冲至 <code>assistantTextBuffer</code>；收到 <code>message.updated</code>（含 <code>time.completed</code>）后立即写入（含模型/Token/TPS 元数据头）；3s 防抖 + 60s 强制刷新作为兜底</td></tr>
       <tr><td><code>session.created</code></td><td>会话创建</td><td>捕获会话标题存入 <code>sessionTitleMap</code>；若对应文件已创建则重命名以匹配标题</td></tr>
       <tr><td><code>session.updated</code></td><td>会话标题变更</td><td>捕获标题变更；若文件已存在则重命名；若文件未创建则存入 <code>pendingRenames</code> 待文件创建后应用</td></tr>
     </table>
@@ -100,7 +100,7 @@
 
 什么是 AI？</code></pre>
     <p><strong>AI 响应（含模型 / Token / TPS 元数据）：</strong></p>
-    <pre><code>============ 2026-06-05 10:05:35 | Model: openai/gpt-4o | In: 45 | Out: 128 | R: 10 | TPS: 25.6 ============
+    <pre><code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt; 2026-06-05 10:05:35 | Model: openai/gpt-4o | In: 45 | Out: 128 | R: 10 | TPS: 25.6 &lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;
 
 人工智能是模拟人类智能的技术……</code></pre>
     <p><strong>Question 工具交互：</strong></p>
@@ -176,9 +176,13 @@ sequenceDiagram
     OC->>PR: message.updated (role=assistant)
     Note over PR: cache model/tokens/time metadata
 
-    OC->>PR: message.part.updated (type=text, role=assistant)
-    Note over PR: buffer text with 3s debounce
-    Note over PR: flush → appendFile(model/TPS header)
+    loop per text chunk
+        OC->>PR: message.part.updated (type=text, role=assistant)
+        Note over PR: buffer text (reset 3s debounce)
+    end
+
+    OC->>PR: message.updated (time.completed)
+    Note over PR: flush buffered text → appendFile(model/TPS header)
 
     OC->>PR: message.part.updated (type=tool, tool=task)
     Note over PR: track child sessionId
@@ -220,7 +224,12 @@ flowchart TD
     Task2 -->|No| Dedup{assistant 已写入?}
     Dedup -->|Yes| Skip
     Dedup -->|No| Buf[缓冲文本 3s 防抖]
-    Buf -->|timer fire| Flush[合并元数据写入文件]
+    Buf -->|time.completed 到达| Flush[合并元数据写入文件]
+    Buf -->|3s 超时无 completed| ReCheck{completed 已设置?}
+    ReCheck -->|Yes| Flush
+    ReCheck -->|No| Wait[重设 3s 防抖]
+    Wait --> Buf
+    Buf -->|60s 强制超时| Flush
       </pre>
       <div class="caption">图 2：消息处理决策流</div>
     </div>
