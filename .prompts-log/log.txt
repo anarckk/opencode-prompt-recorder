@@ -1,9 +1,0 @@
-[2026-06-22T02:09:58.542Z] [prompt-recorder] event=message.part.updated, role=user, sessionID=ses_112e88b91ffeGgjVMS2gpRZI3n, textLength=7, textPreview=英国首都是哪里
-[2026-06-22T02:10:35.239Z] [prompt-recorder] event=message.part.updated, role=user, sessionID=ses_1130b7164ffePifMu29DMi0GbY, textLength=67, textPreview=还是不行
-.prompts-log/log.txt
-.prompts/2026/06/22/2606
-[2026-06-22T02:15:58.687Z] [prompt-recorder] event=message.part.updated, role=user, sessionID=ses_112e30bdbffe5pkTJjrdE9dL6o, textLength=6270, textPreview=# OpenCode 插件自动更新实现指南
-
-## Overview
-
-OpenCode 插件的自动
